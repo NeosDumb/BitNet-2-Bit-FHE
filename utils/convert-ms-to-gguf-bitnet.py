@@ -33,6 +33,11 @@ from sentencepiece import SentencePieceProcessor
 if 'NO_LOCAL_GGUF' not in os.environ:
     sys.path.insert(1, str(Path(__file__).parent / 'gguf-py'))
 import gguf
+from gguf import LlamaFileType
+
+# Define missing enum values locally if needed
+# 40 is LLAMA_FTYPE_MOSTLY_I2_S in llama.h
+LlamaFileType_MOSTLY_I2_S = getattr(LlamaFileType, 'MOSTLY_I2_S', 40)
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeAlias
@@ -176,30 +181,24 @@ SAFETENSORS_DATA_TYPES: dict[str, DataType] = {
 # TODO: move to `gguf.py`
 
 
-class GGMLFileType(enum.IntEnum):
-    AllF32     = 0
-    MostlyF16  = 1  # except 1d tensors
-    MostlyI2   = 2  # except 1d tensors
-    MostlyQ8_0 = 7  # except 1d tensors
-
-    def type_for_tensor(self, name: str, tensor: LazyTensor) -> DataType:
-        dt = GGML_FILE_TYPE_TO_DATA_TYPE.get(self)
-        if dt is None:
-            raise ValueError(self)
-        # Convert all 1D tensors to F32.  Most of the codebase that takes in 1D tensors only handles F32 tensors, and most of the outputs tensors are F32.
-        #  Also The 1d tensors aren't much of a performance/size issue.  So instead of having to have separate F32 and F16 implementations of both, just convert everything to F32 for now.
-        dt = dt if len(tensor.shape) > 1 else DT_F32
-        if name == "token_embd.weight" or name == "output.weight":
-            dt = DT_F32
-        return dt
-
-
-GGML_FILE_TYPE_TO_DATA_TYPE: dict[GGMLFileType, DataType] = {
-    GGMLFileType.AllF32    : DT_F32,
-    GGMLFileType.MostlyF16 : DT_F16,
-    GGMLFileType.MostlyI2  : DT_I2,
-    GGMLFileType.MostlyQ8_0: DT_Q8_0,
+GGML_FILE_TYPE_TO_DATA_TYPE: dict[int, DataType] = {
+    LlamaFileType.ALL_F32         : DT_F32,
+    LlamaFileType.MOSTLY_F16      : DT_F16,
+    LlamaFileType_MOSTLY_I2_S     : DT_I2,
+    LlamaFileType.MOSTLY_Q8_0     : DT_Q8_0,
 }
+
+
+def get_data_type_for_tensor(ftype: int, name: str, tensor: LazyTensor) -> DataType:
+    dt = GGML_FILE_TYPE_TO_DATA_TYPE.get(ftype)
+    if dt is None:
+        raise ValueError(ftype)
+    # Convert all 1D tensors to F32.  Most of the codebase that takes in 1D tensors only handles F32 tensors, and most of the outputs tensors are F32.
+    #  Also The 1d tensors aren't much of a performance/size issue.  So instead of having to have separate F32 and F16 implementations of both, just convert everything to F32 for now.
+    dt = dt if len(tensor.shape) > 1 else DT_F32
+    if name == "token_embd.weight" or name == "output.weight":
+        dt = DT_F32
+    return dt
 
 #
 # hparams loading
@@ -225,7 +224,7 @@ class Params:
     n_orig_ctx: int | None = None
     rope_finetuned: bool | None = None
 
-    ftype: GGMLFileType | None = None
+    ftype: int | None = None
 
     # path to the directory containing the model files
     path_model: Path | None = None
@@ -1341,14 +1340,14 @@ class OutputFile:
     def write_tensor_info(self) -> None:
         self.gguf.write_ti_data_to_file()
 
-    def write_tensor_data(self, ftype: GGMLFileType, model: LazyModel, concurrency: int) -> None:
+    def write_tensor_data(self, ftype: int, model: LazyModel, concurrency: int) -> None:
         ndarrays_inner = bounded_parallel_map(OutputFile.do_item, model.items(), concurrency=concurrency)
-        if ftype == GGMLFileType.MostlyQ8_0:
+        if ftype == LlamaFileType.MOSTLY_Q8_0:
             ndarrays = bounded_parallel_map(
                 OutputFile.maybe_do_quantize, ndarrays_inner, concurrency=concurrency, max_workers=concurrency,
                 use_processpool_executor=True,
             )
-        # elif ftype == GGMLFileType.MostlyI2:
+        # elif ftype == LlamaFileType_MOSTLY_I2_S:
         #     # ndarrays = bounded_parallel_map(
         #     #     OutputFile.maybe_do_transform, ndarrays_inner, concurrency=concurrency, max_workers=concurrency, use_processpool_executor=True,)
         #     ndarrays = map(OutputFile.maybe_do_transform, ndarrays_inner)
@@ -1409,7 +1408,7 @@ class OutputFile:
 
     @staticmethod
     def write_all(
-        fname_out: Path, ftype: GGMLFileType, params: Params, model: LazyModel, vocab: BaseVocab, svocab: gguf.SpecialVocab,
+        fname_out: Path, ftype: int, params: Params, model: LazyModel, vocab: BaseVocab, svocab: gguf.SpecialVocab,
         concurrency: int = DEFAULT_CONCURRENCY, endianess: gguf.GGUFEndian = gguf.GGUFEndian.LITTLE,
         pad_vocab: bool = False,
     ) -> None:
@@ -1441,30 +1440,30 @@ class OutputFile:
         of.close()
 
 
-def pick_output_type(model: LazyModel, output_type_str: str | None) -> GGMLFileType:
+def pick_output_type(model: LazyModel, output_type_str: str | None) -> int:
     wq_type = model[gguf.TENSOR_NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0) + ".weight"].data_type
 
     if output_type_str == "f32" or (output_type_str is None and wq_type in (DT_F32, DT_BF16)):
-        return GGMLFileType.AllF32
+        return LlamaFileType.ALL_F32
     if output_type_str == "f16" or (output_type_str is None and wq_type == DT_F16):
-        return GGMLFileType.MostlyF16
+        return LlamaFileType.MOSTLY_F16
     if output_type_str == "q8_0":
-        return GGMLFileType.MostlyQ8_0
+        return LlamaFileType.MOSTLY_Q8_0
     if output_type_str == "i2":
-        return GGMLFileType.MostlyI2
+        return LlamaFileType_MOSTLY_I2_S
 
     name_to_type = {name: lazy_tensor.data_type for (name, lazy_tensor) in model.items()}
 
     raise ValueError(f"Unexpected combination of types: {name_to_type}")
 
 
-def convert_to_output_type(model: LazyModel, output_type: GGMLFileType) -> LazyModel:
+def convert_to_output_type(model: LazyModel, output_type: int) -> LazyModel:
     # for (name, tensor) in model.items():
     #     print(name)
     #     print(tensor)
-    #     print(output_type.type_for_tensor(name, tensor))
-    #     print(tensor.astype(output_type.type_for_tensor(name, tensor)))
-    return {name: tensor.astype(output_type.type_for_tensor(name, tensor))
+    #     print(get_data_type_for_tensor(output_type, name, tensor))
+    #     print(tensor.astype(get_data_type_for_tensor(output_type, name, tensor)))
+    return {name: tensor.astype(get_data_type_for_tensor(output_type, name, tensor))
             for (name, tensor) in model.items()}
 
 
@@ -1718,12 +1717,12 @@ class VocabFactory:
         return vocab, special_vocab
 
 
-def default_outfile(model_paths: list[Path], file_type: GGMLFileType) -> Path:
+def default_outfile(model_paths: list[Path], file_type: int) -> Path:
     namestr = {
-        GGMLFileType.AllF32:    "f32",
-        GGMLFileType.MostlyF16: "f16",
-        GGMLFileType.MostlyQ8_0:"q8_0",
-        GGMLFileType.MostlyI2:  "i2",
+        LlamaFileType.ALL_F32:    "f32",
+        LlamaFileType.MOSTLY_F16: "f16",
+        LlamaFileType.MOSTLY_Q8_0:"q8_0",
+        LlamaFileType_MOSTLY_I2_S:  "i2",
     }[file_type]
     ret = model_paths[0].parent / f"ggml-model-{namestr}.gguf"
     if ret in model_paths:
@@ -1808,10 +1807,10 @@ def main(args_in: list[str] | None = None) -> None:
 
     if args.outtype:
         params.ftype = {
-            "f32": GGMLFileType.AllF32,
-            "f16": GGMLFileType.MostlyF16,
-            "i2" : GGMLFileType.MostlyI2,
-            "q8_0": GGMLFileType.MostlyQ8_0,
+            "f32": LlamaFileType.ALL_F32,
+            "f16": LlamaFileType.MOSTLY_F16,
+            "i2" : LlamaFileType_MOSTLY_I2_S,
+            "q8_0": LlamaFileType.MOSTLY_Q8_0,
         }[args.outtype]
 
     logger.info(f"params = {params}")
