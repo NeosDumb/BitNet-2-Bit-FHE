@@ -1,0 +1,3 @@
+## 2024-05-24 - Fused Quantization via Sign Invariance
+**Learning:** In scale-based ternary quantization, if the global scale factor is mathematically constrained to be non-negative (e.g., maximum absolute value), the ternary mapping operation `val * scale > 0` simplifies algebraically to `val > 0`. This "sign invariance" eliminates the temporal dependency on the full-pass calculation of the global scale.
+**Action:** Apply this optimization to fuse the O(N) max-scan, the intermediate O(N) memory allocation, and the O(N) bit-packing loops into a single O(1) memory mapping pass, reducing memory bandwidth pressure and accelerating quantization.
