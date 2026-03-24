@@ -1,0 +1,5 @@
+## 2025-02-19 - Fusing Max-Scan and Quantization via Scalar Invariance
+
+**Learning:** I discovered a deeper mathematical pattern in ternary quantization (`quantize_i2_s`). The standard approach computes the max-norm ($max = \max |x_i|$) and then scales $x_i$ to determine the quantized state: $q_i = (x_i \cdot max > 0) \to \{0, 1, 2\}$. However, since $max > 0$ is strictly positive, the sign of $x_i \cdot max$ is invariant to $max$. Thus, $q_i$ only depends on the sign and magnitude of $x_i$ relative to an epsilon threshold: $q_i = (x_i > \epsilon) ? 2 : (x_i < -\epsilon) ? 0 : 1$. This decoupling of max-norm and ternary assignment reveals that the two passes can be mathematically fused, eliminating intermediate $O(n)$ heap allocation.
+
+**Action:** Whenever a normalization or scaling factor is used solely to determine a sign or relative ordering, recognize the scalar multiplication invariance. Exploit this property to fuse dependent loops and replace $O(n)$ space allocations with $O(1)$ in-place operations.
