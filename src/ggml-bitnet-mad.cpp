@@ -55,42 +55,40 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     int n = nrow * n_per_row;
 
-    // f32 -> q8
-    double max = 0;
-    for (int i = 0; i < n; ++i) {
-        max = fmax(max, (double)fabs((double)src[i]));
-    }
-    double i2_scale = max;
-
-    uint8_t* q8 = (uint8_t*)malloc(n * sizeof(uint8_t));
-    for (int i=0; i<n; i++) {
-        if (fabs((double)(src[i])) < 1e-6) {
-            q8[i] = 1;
-            continue;
-        }
-        q8[i] = (double)src[i] * i2_scale > 0 ? 2 : 0;
-    }
-
+    // ⚡ Hugo: Fused-loop optimization to perform max-scan, quantization, and bit-packing in a single pass.
+    // Mathematical insight: since i2_scale is strictly non-negative, the expression
+    // `val * i2_scale > 0` is mathematically equivalent to `val > 0`. This sign invariance
+    // means we can determine the quantization bits independently of the global scale,
+    // eliminating O(N) heap allocations (O(1) memory mapping).
     memset(dst, 0, n * sizeof(uint8_t) / 4);
 
-    // q8 -> 0, 1, 2
-    //       |  |  |
-    //      -1, 0, 1
-
     uint8_t* i2_weight = (uint8_t*)dst;
+    double max = 0;
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
+            int idx = i * QK_I2_S + j;
+            double val = (double)src[idx];
+            double abs_val = fabs(val);
+            if (abs_val > max) {
+                max = abs_val;
+            }
+
+            uint8_t q;
+            if (abs_val < 1e-6) {
+                q = 1;
+            } else {
+                q = val > 0 ? 2 : 0;
+            }
+
             int group_idx = j / 32;
             int group_pos = j % 32;
-            uint8_t temp = (q8[i * QK_I2_S + j] << (6 - 2 * group_idx));
+            uint8_t temp = (q << (6 - 2 * group_idx));
             i2_weight[i * 32 + group_pos] |= temp;            
         }
     }
 
     float* scale_ptr = (float*)((char*)i2_weight + n / 4);
-    scale_ptr[0] = i2_scale;
-
-    free(q8);
+    scale_ptr[0] = (float)max;
 
     // 32B for alignment
     return nrow * row_size / 4 + 32;
@@ -100,25 +98,11 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     size_t row_size = ggml_row_size(GGML_TYPE_I2_S, n_per_row);
     int64_t n = nrow * n_per_row;
 
-    double max = 0;
-    for (int64_t i = 0; i < n; ++i) {
-        max = fmax(max, (double)fabs((double)src[i]));
-    }
-    double i2_scale = max;
-
-    uint8_t* q8 = (uint8_t*)malloc(n * sizeof(uint8_t));
-    for (int64_t i=0; i<n; i++) {
-        if (fabs((double)(src[i])) < 1e-6) {
-            q8[i] = 1;
-            continue;
-        }
-        q8[i] = (double)src[i] * i2_scale > 0 ? 2 : 0;
-    }
-
+    // ⚡ Hugo: Fused-loop optimization to perform max-scan, quantization, and bit-packing in a single pass.
     uint8_t* out = (uint8_t*)dst;
     memset(out, 0, (size_t)(n / 4));
 
-    // for each group of 4 rows, for each column, write one byte
+    double max = 0;
     int64_t nrow4 = nrow / 4;
     for (int64_t rg = 0; rg < nrow4; rg++) {
         int64_t r0 = rg * 4 + 0;
@@ -129,10 +113,25 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
         int64_t base = rg * n_per_row;
 
         for (int64_t col = 0; col < n_per_row; col++) {
-            uint8_t q0 = q8[r0 * n_per_row + col];
-            uint8_t q1 = q8[r1 * n_per_row + col];
-            uint8_t q2 = q8[r2 * n_per_row + col];
-            uint8_t q3 = q8[r3 * n_per_row + col];
+            double v0 = (double)src[r0 * n_per_row + col];
+            double v1 = (double)src[r1 * n_per_row + col];
+            double v2 = (double)src[r2 * n_per_row + col];
+            double v3 = (double)src[r3 * n_per_row + col];
+
+            double a0 = fabs(v0);
+            double a1 = fabs(v1);
+            double a2 = fabs(v2);
+            double a3 = fabs(v3);
+
+            if (a0 > max) max = a0;
+            if (a1 > max) max = a1;
+            if (a2 > max) max = a2;
+            if (a3 > max) max = a3;
+
+            uint8_t q0 = a0 < 1e-6 ? 1 : (v0 > 0 ? 2 : 0);
+            uint8_t q1 = a1 < 1e-6 ? 1 : (v1 > 0 ? 2 : 0);
+            uint8_t q2 = a2 < 1e-6 ? 1 : (v2 > 0 ? 2 : 0);
+            uint8_t q3 = a3 < 1e-6 ? 1 : (v3 > 0 ? 2 : 0);
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -141,9 +140,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     // store scale at the end of quantized data (same location pattern as quantize_i2_s)
     float* scale_ptr = (float*)((char*)out + n / 4);
-    scale_ptr[0] = (float)i2_scale;
-
-    free(q8);
+    scale_ptr[0] = (float)max;
 
     // return size (keep same formula as quantize_i2_s)
     return nrow * row_size / 4 + 32;
@@ -153,42 +150,36 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     int n = nrow * n_per_row;
 
-    // f32 -> q8
-    double max = 0;
-    for (int i = 0; i < n; ++i) {
-        max = fmax(max, (double)fabs((double)src[i]));
-    }
-    double i2_scale = max;
-
-    uint8_t* q8 = (uint8_t*)malloc(n * sizeof(uint8_t));
-    for (int i=0; i<n; i++) {
-        if (fabs((double)(src[i])) < 1e-6) {
-            q8[i] = 1;
-            continue;
-        }
-        q8[i] = (double)src[i] * i2_scale > 0 ? 2 : 0;
-    }
-
+    // ⚡ Hugo: Fused-loop optimization to perform max-scan, quantization, and bit-packing in a single pass.
     memset(dst, 0, n * sizeof(uint8_t) / 4);
 
-    // q8 -> 0, 1, 2
-    //       |  |  |
-    //      -1, 0, 1
-
     uint8_t* i2_weight = (uint8_t*)dst;
+    double max = 0;
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
+            int idx = i * QK_I2_S + j;
+            double val = (double)src[idx];
+            double abs_val = fabs(val);
+            if (abs_val > max) {
+                max = abs_val;
+            }
+
+            uint8_t q;
+            if (abs_val < 1e-6) {
+                q = 1;
+            } else {
+                q = val > 0 ? 2 : 0;
+            }
+
             int group_idx = j / 16;
             int group_pos = j % 16;
-            uint8_t temp = (q8[i * QK_I2_S + j] << (6 - 2 * group_idx));
+            uint8_t temp = (q << (6 - 2 * group_idx));
             i2_weight[i * 16 + group_pos] |= temp;            
         }
     }
 
     float* scale_ptr = (float*)((char*)i2_weight + n / 4);
-    scale_ptr[0] = i2_scale;
-
-    free(q8);
+    scale_ptr[0] = (float)max;
 
     // 32B for alignment
     return nrow * row_size / 4 + 32;
