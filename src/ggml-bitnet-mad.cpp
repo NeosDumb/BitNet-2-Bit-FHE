@@ -51,6 +51,152 @@ static inline int hsum_i32_8(const __m256i a) {
 size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
 #if defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__) || defined(__SSSE3__)
 #if defined(ACT_PARALLEL)
+#if defined(__AVX2__)
+    size_t row_size = ggml_row_size(GGML_TYPE_I2_S, n_per_row);
+    int n = nrow * n_per_row;
+
+    double max = 0;
+
+    // 1. Calculate max (SIMD optimized)
+    // We scan the array to find the maximum absolute value for scaling.
+    // Using AVX registers speeds up this scan significantly.
+    __m256 max_vec = _mm256_setzero_ps();
+    int n_simd = (n / 8) * 8;
+    for (int i = 0; i < n_simd; i += 8) {
+        __m256 v = _mm256_loadu_ps(src + i);
+        const __m256 sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
+        v = _mm256_and_ps(v, sign_mask);
+        max_vec = _mm256_max_ps(max_vec, v);
+    }
+    float max_arr[8];
+    _mm256_storeu_ps(max_arr, max_vec);
+    for (int i = 0; i < 8; ++i) {
+        max = fmax(max, (double)max_arr[i]);
+    }
+    for (int i = n_simd; i < n; ++i) {
+        max = fmax(max, (double)fabs((double)src[i]));
+    }
+
+    double i2_scale = max;
+    float i2_scale_f = (float)max;
+
+    // 2. Quantize and Pack
+    // The previous implementation used a two-pass approach with an intermediate buffer (q8)
+    // and scalar loops. This new implementation fuses quantization and packing into a single
+    // pass using AVX2 SIMD instructions, avoiding memory allocation and significantly reducing
+    // CPU cycles.
+
+    // We process blocks of QK_I2_S (128) floats, producing 32 bytes of packed output.
+    // NOTE: This AVX2 optimization assumes QK_I2_S is 128. If it differs, we must fallback.
+    if (QK_I2_S != 128) {
+        // Fallback to scalar implementation if block size is not 128
+        // This duplicates the fallback logic to ensure correctness for non-standard block sizes
+        // reusing the same scalar logic as the #else block below.
+
+        uint8_t* q8 = (uint8_t*)malloc(n * sizeof(uint8_t));
+        for (int i=0; i<n; i++) {
+            if (fabs((double)(src[i])) < 1e-6) {
+                q8[i] = 1;
+                continue;
+            }
+            q8[i] = (double)src[i] * i2_scale > 0 ? 2 : 0;
+        }
+
+        memset(dst, 0, n * sizeof(uint8_t) / 4);
+
+        uint8_t* i2_weight = (uint8_t*)dst;
+        for (int i = 0; i < n / QK_I2_S; i++) {
+            for (int j = 0; j < QK_I2_S; j++) {
+                int group_idx = j / 32;
+                int group_pos = j % 32;
+                uint8_t temp = (q8[i * QK_I2_S + j] << (6 - 2 * group_idx));
+                i2_weight[i * 32 + group_pos] |= temp;
+            }
+        }
+
+        float* scale_ptr = (float*)((char*)i2_weight + n / 4);
+        scale_ptr[0] = i2_scale_f;
+
+        free(q8);
+        return nrow * row_size / 4 + 32;
+    }
+
+    uint8_t* i2_weight = (uint8_t*)dst;
+    int nb = n / QK_I2_S; // Number of blocks
+
+    const __m256 zero_vec = _mm256_setzero_ps();
+    const __m256 epsilon_vec = _mm256_set1_ps(1e-6f);
+    const __m256 sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
+    const __m256i twos = _mm256_set1_epi32(2);
+    const __m256i ones = _mm256_set1_epi32(1);
+
+    for (int i = 0; i < nb; i++) {
+        const float* src_block = src + i * QK_I2_S;
+        uint8_t* dst_block = i2_weight + i * 32;
+
+        // Process 32 output bytes in chunks of 8 (consuming 32 floats per chunk)
+        for (int p = 0; p < 32; p += 8) {
+            // Load 8 floats from each of the 4 streams corresponding to packed bit positions
+            __m256 v0 = _mm256_loadu_ps(src_block + p);
+            __m256 v1 = _mm256_loadu_ps(src_block + p + 32);
+            __m256 v2 = _mm256_loadu_ps(src_block + p + 64);
+            __m256 v3 = _mm256_loadu_ps(src_block + p + 96);
+
+            // Lambda to quantize vector of 8 floats to 2-bit values (0, 1, 2)
+            auto quantize_vec = [&](__m256 v) -> __m256i {
+                __m256 abs_v = _mm256_and_ps(v, sign_mask);
+                __m256 mask_zero = _mm256_cmp_ps(abs_v, epsilon_vec, _CMP_LT_OQ);
+                __m256 mask_pos = _mm256_cmp_ps(v, zero_vec, _CMP_GT_OQ);
+
+                // Logic:
+                // if abs(v) < 1e-6 (mask_zero) -> 1 (01 binary)
+                // else if v > 0 (mask_pos)     -> 2 (10 binary)
+                // else                         -> 0 (00 binary)
+
+                __m256i i_mask_pos = _mm256_castps_si256(mask_pos);
+                __m256i res = _mm256_and_si256(i_mask_pos, twos); // Set to 2 if positive
+
+                __m256i i_mask_zero = _mm256_castps_si256(mask_zero);
+                res = _mm256_andnot_si256(i_mask_zero, res);      // Clear if zero
+                res = _mm256_or_si256(res, _mm256_and_si256(i_mask_zero, ones)); // Set to 1 if zero
+
+                return res;
+            };
+
+            __m256i q0 = quantize_vec(v0);
+            __m256i q1 = quantize_vec(v1);
+            __m256i q2 = quantize_vec(v2);
+            __m256i q3 = quantize_vec(v3);
+
+            // Pack bits: q0 << 6 | q1 << 4 | q2 << 2 | q3
+            __m256i packed_32 = _mm256_or_si256(
+                                _mm256_or_si256(_mm256_slli_epi32(q0, 6), _mm256_slli_epi32(q1, 4)),
+                                _mm256_or_si256(_mm256_slli_epi32(q2, 2), q3)
+                            );
+
+            // Pack 32-bit integers to 8-bit bytes
+            // packus_epi32: 32-bit -> 16-bit
+            __m256i zero_256 = _mm256_setzero_si256();
+            __m256i packed_16 = _mm256_packus_epi32(packed_32, zero_256);
+            // packus_epi16: 16-bit -> 8-bit
+            __m256i packed_8 = _mm256_packus_epi16(packed_16, zero_256);
+
+            // Extract and store results
+            // Note: AVX2 pack instructions interleave lanes, so we extract carefully.
+            int val0 = _mm256_extract_epi32(packed_8, 0); // Lane 0, bytes 0-3
+            int val1 = _mm256_extract_epi32(packed_8, 4); // Lane 1, bytes 0-3
+
+            *(int*)(dst_block + p) = val0;
+            *(int*)(dst_block + p + 4) = val1;
+        }
+    }
+
+    float* scale_ptr = (float*)((char*)i2_weight + n / 4);
+    scale_ptr[0] = i2_scale_f;
+
+    // 32B for alignment
+    return nrow * row_size / 4 + 32;
+#else
     size_t row_size = ggml_row_size(GGML_TYPE_I2_S, n_per_row);
 
     int n = nrow * n_per_row;
@@ -94,6 +240,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     // 32B for alignment
     return nrow * row_size / 4 + 32;
+#endif
 #else
     assert((nrow % 4) == 0 && "quantize_i2_s_1x4 requires nrow % 4 == 0");
 
