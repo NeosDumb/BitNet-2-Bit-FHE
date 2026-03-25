@@ -1,0 +1,3 @@
+## 2026-06-03 - Fused Quantization and Packing
+**Learning:** Found an $O(N)$ allocation anti-pattern for a temporary buffer (`q8`) in `quantize_i2_s`. The mapping from float to 2-bit code is stateless and can be computed on-the-fly during packing. By fusing the quantization and packing loops, we eliminate the intermediate array, saving $O(N)$ memory allocation and improving cache locality by processing 128-element blocks entirely in registers/L1 cache.
+**Action:** When seeing sequential loops where the first produces a temporary array consumed only by the second, consider fusing them, especially if the transformation is simple (stateless). This reduces "computational potential energy" wasted on memory traffic.
