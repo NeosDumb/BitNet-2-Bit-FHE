@@ -55,42 +55,57 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     int n = nrow * n_per_row;
 
-    // f32 -> q8
+    // f32 -> max
     double max = 0;
     for (int i = 0; i < n; ++i) {
         max = fmax(max, (double)fabs((double)src[i]));
     }
     double i2_scale = max;
 
-    uint8_t* q8 = (uint8_t*)malloc(n * sizeof(uint8_t));
-    for (int i=0; i<n; i++) {
-        if (fabs((double)(src[i])) < 1e-6) {
-            q8[i] = 1;
-            continue;
-        }
-        q8[i] = (double)src[i] * i2_scale > 0 ? 2 : 0;
-    }
-
-    memset(dst, 0, n * sizeof(uint8_t) / 4);
-
-    // q8 -> 0, 1, 2
-    //       |  |  |
-    //      -1, 0, 1
-
     uint8_t* i2_weight = (uint8_t*)dst;
-    for (int i = 0; i < n / QK_I2_S; i++) {
-        for (int j = 0; j < QK_I2_S; j++) {
-            int group_idx = j / 32;
-            int group_pos = j % 32;
-            uint8_t temp = (q8[i * QK_I2_S + j] << (6 - 2 * group_idx));
-            i2_weight[i * 32 + group_pos] |= temp;            
+    int num_blocks = n / QK_I2_S;
+
+    // Optimization: Fused quantization and packing to avoid malloc overhead
+    for (int i = 0; i < num_blocks; ++i) {
+        const float* src_ptr = src + i * QK_I2_S;
+        uint8_t* dst_ptr = i2_weight + i * 32;
+
+        // Unroll outer loop for packing bytes (0..31)
+        for (int k = 0; k < 32; ++k) {
+            uint8_t byte_val = 0;
+
+            // Unrolled inner loop over 4 groups (bits 6, 4, 2, 0)
+            // Group 0
+            {
+                float val = src_ptr[k];
+                uint8_t q = (fabs((double)val) < 1e-6) ? 1 : ((val > 0) ? 2 : 0);
+                byte_val |= (q << 6);
+            }
+            // Group 1
+            {
+                float val = src_ptr[k + 32];
+                uint8_t q = (fabs((double)val) < 1e-6) ? 1 : ((val > 0) ? 2 : 0);
+                byte_val |= (q << 4);
+            }
+            // Group 2
+            {
+                float val = src_ptr[k + 64];
+                uint8_t q = (fabs((double)val) < 1e-6) ? 1 : ((val > 0) ? 2 : 0);
+                byte_val |= (q << 2);
+            }
+            // Group 3
+            {
+                float val = src_ptr[k + 96];
+                uint8_t q = (fabs((double)val) < 1e-6) ? 1 : ((val > 0) ? 2 : 0);
+                byte_val |= q;
+            }
+
+            dst_ptr[k] = byte_val;
         }
     }
 
     float* scale_ptr = (float*)((char*)i2_weight + n / 4);
     scale_ptr[0] = i2_scale;
-
-    free(q8);
 
     // 32B for alignment
     return nrow * row_size / 4 + 32;
