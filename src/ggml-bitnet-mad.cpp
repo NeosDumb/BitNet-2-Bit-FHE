@@ -57,22 +57,27 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     memset(dst, 0, n * sizeof(uint8_t) / 4);
     uint8_t* i2_weight = (uint8_t*)dst;
 
-    double max = 0;
+    float max = 0.0f;
 
     // Scale-Invariant Fused Quantization:
     // We compute max dynamically, check the threshold directly,
     // and pack into dst without using intermediate dynamically allocated q8 buffer.
+    // Mathematical Precision Alignment:
+    // Floating-point precision strictly bounded to single precision (float).
+    // Minimizes action: eliminating implicit double casting cuts SIMD/register stalls.
+    // Precomputing `abs_val` removes duplicate absolute value calculations.
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
-            double val = (double)src[src_idx];
-            max = fmax(max, (double)fabs(val));
+            float val = src[src_idx];
+            float abs_val = fabsf(val);
+            max = fmaxf(max, abs_val);
 
             uint8_t q_val;
-            if (fabs(val) < 1e-6) {
+            if (abs_val < 1e-6f) {
                 q_val = 1;
             } else {
-                q_val = val > 0 ? 2 : 0;
+                q_val = val > 0.0f ? 2 : 0;
             }
 
             int group_idx = j / 32;
@@ -95,8 +100,10 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     uint8_t* out = (uint8_t*)dst;
     memset(out, 0, (size_t)(n / 4));
 
-    double max = 0;
+    float max = 0.0f;
 
+    // Mathematical Precision Alignment:
+    // Omit `double` casting to keep execution paths within native float precision.
     int64_t nrow4 = nrow / 4;
     for (int64_t rg = 0; rg < nrow4; rg++) {
         int64_t r0 = rg * 4 + 0;
@@ -107,20 +114,25 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
         int64_t base = rg * n_per_row;
 
         for (int64_t col = 0; col < n_per_row; col++) {
-            double v0 = (double)src[r0 * n_per_row + col];
-            double v1 = (double)src[r1 * n_per_row + col];
-            double v2 = (double)src[r2 * n_per_row + col];
-            double v3 = (double)src[r3 * n_per_row + col];
+            float v0 = src[r0 * n_per_row + col];
+            float v1 = src[r1 * n_per_row + col];
+            float v2 = src[r2 * n_per_row + col];
+            float v3 = src[r3 * n_per_row + col];
 
-            max = fmax(max, (double)fabs(v0));
-            max = fmax(max, (double)fabs(v1));
-            max = fmax(max, (double)fabs(v2));
-            max = fmax(max, (double)fabs(v3));
+            float abs_v0 = fabsf(v0);
+            float abs_v1 = fabsf(v1);
+            float abs_v2 = fabsf(v2);
+            float abs_v3 = fabsf(v3);
 
-            uint8_t q0 = fabs(v0) < 1e-6 ? 1 : (v0 > 0 ? 2 : 0);
-            uint8_t q1 = fabs(v1) < 1e-6 ? 1 : (v1 > 0 ? 2 : 0);
-            uint8_t q2 = fabs(v2) < 1e-6 ? 1 : (v2 > 0 ? 2 : 0);
-            uint8_t q3 = fabs(v3) < 1e-6 ? 1 : (v3 > 0 ? 2 : 0);
+            max = fmaxf(max, abs_v0);
+            max = fmaxf(max, abs_v1);
+            max = fmaxf(max, abs_v2);
+            max = fmaxf(max, abs_v3);
+
+            uint8_t q0 = abs_v0 < 1e-6f ? 1 : (v0 > 0.0f ? 2 : 0);
+            uint8_t q1 = abs_v1 < 1e-6f ? 1 : (v1 > 0.0f ? 2 : 0);
+            uint8_t q2 = abs_v2 < 1e-6f ? 1 : (v2 > 0.0f ? 2 : 0);
+            uint8_t q3 = abs_v3 < 1e-6f ? 1 : (v3 > 0.0f ? 2 : 0);
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -128,7 +140,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     }
 
     float* scale_ptr = (float*)((char*)out + n / 4);
-    scale_ptr[0] = (float)max;
+    scale_ptr[0] = max;
 
     return nrow * row_size / 4 + 32;
 #endif
@@ -139,19 +151,24 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     memset(dst, 0, n * sizeof(uint8_t) / 4);
     uint8_t* i2_weight = (uint8_t*)dst;
 
-    double max = 0;
+    float max = 0.0f;
 
+    // Mathematical Precision Alignment:
+    // Floating-point precision strictly bounded to single precision (float).
+    // Minimizes action: eliminating implicit double casting cuts SIMD/register stalls.
+    // Precomputing `abs_val` removes duplicate absolute value calculations.
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
-            double val = (double)src[src_idx];
-            max = fmax(max, (double)fabs(val));
+            float val = src[src_idx];
+            float abs_val = fabsf(val);
+            max = fmaxf(max, abs_val);
 
             uint8_t q_val;
-            if (fabs(val) < 1e-6) {
+            if (abs_val < 1e-6f) {
                 q_val = 1;
             } else {
-                q_val = val > 0 ? 2 : 0;
+                q_val = val > 0.0f ? 2 : 0;
             }
 
             int group_idx = j / 16;
