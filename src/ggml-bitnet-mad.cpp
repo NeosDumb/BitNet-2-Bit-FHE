@@ -66,6 +66,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     // Scale-Invariant Fused Quantization:
     // We compute max dynamically, check the threshold directly,
     // and pack into dst without using intermediate dynamically allocated q8 buffer.
+    // Optimization: Mathematical operations conserved to single-precision space
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
@@ -76,7 +77,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             if (fabsf(val) < 1e-6f) {
                 q_val = 1;
             } else {
-                q_val = val > 0 ? 2 : 0;
+                q_val = val > 0.0f ? 2 : 0;
             }
 
             int group_idx = j / 32;
@@ -110,6 +111,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
         int64_t base = rg * n_per_row;
 
+        // Optimization: Mathematical operations conserved to single-precision space
         for (int64_t col = 0; col < n_per_row; col++) {
             float v0 = src[r0 * n_per_row + col];
             float v1 = src[r1 * n_per_row + col];
@@ -121,10 +123,10 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             max = fmaxf(max, fabsf(v2));
             max = fmaxf(max, fabsf(v3));
 
-            uint8_t q0 = fabsf(v0) < 1e-6f ? 1 : (v0 > 0 ? 2 : 0);
-            uint8_t q1 = fabsf(v1) < 1e-6f ? 1 : (v1 > 0 ? 2 : 0);
-            uint8_t q2 = fabsf(v2) < 1e-6f ? 1 : (v2 > 0 ? 2 : 0);
-            uint8_t q3 = fabsf(v3) < 1e-6f ? 1 : (v3 > 0 ? 2 : 0);
+            uint8_t q0 = fabsf(v0) < 1e-6f ? 1 : (v0 > 0.0f ? 2 : 0);
+            uint8_t q1 = fabsf(v1) < 1e-6f ? 1 : (v1 > 0.0f ? 2 : 0);
+            uint8_t q2 = fabsf(v2) < 1e-6f ? 1 : (v2 > 0.0f ? 2 : 0);
+            uint8_t q3 = fabsf(v3) < 1e-6f ? 1 : (v3 > 0.0f ? 2 : 0);
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -132,7 +134,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     }
 
     float* scale_ptr = (float*)((char*)out + n / 4);
-    scale_ptr[0] = (float)max;
+    scale_ptr[0] = max;
 
     return nrow * row_size / 4 + 32;
 #endif
@@ -145,6 +147,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
     float max = 0.0f;
 
+    // Optimization: Mathematical operations conserved to single-precision space
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
@@ -155,7 +158,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             if (fabsf(val) < 1e-6f) {
                 q_val = 1;
             } else {
-                q_val = val > 0 ? 2 : 0;
+                q_val = val > 0.0f ? 2 : 0;
             }
 
             int group_idx = j / 16;
