@@ -20,7 +20,7 @@ def run_command(command, shell=False, log_step=None):
             subprocess.run(command, shell=shell, check=True)
         except subprocess.CalledProcessError as e:
             logging.error(f"Error occurred while running command: {e}")
-        sys.exit(1)
+            sys.exit(1)
 
 def run_benchmark():
     build_dir =  os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build")
@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument("-n", "--n-token", type=int, help="Number of generated tokens", required=False, default=128)
     parser.add_argument("-p", "--n-prompt", type=int, help="Prompt to generate text from", required=False, default=512)
     parser.add_argument("-t", "--threads", type=int, help="Number of threads to use", required=False, default=2)
+    parser.add_argument("--log-dir", type=str, help="Directory to store logs", required=False, default="logs")
     return parser.parse_args()
 
 if __name__ == "__main__":
