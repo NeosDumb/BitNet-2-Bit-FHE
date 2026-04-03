@@ -734,14 +734,16 @@ if __name__ == "__main__":
 
     output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "include")
 
-    with open(''.join([output_dir, "/bitnet-lut-kernels.h"]), 'w') as f:
-        f.write(''.join("#if defined(GGML_BITNET_X86_TL2)"))
-        f.write(''.join(ctor_code))
-        for code in tbl_impl_code:
-            f.write(''.join(code))
-        f.write(''.join(api_code))
-        f.write(''.join(trans_code))
-        f.write(''.join("#endif"))
+    with open(os.path.join(output_dir, "bitnet-lut-kernels.h"), 'w') as f:
+        lines = [
+            "#if defined(GGML_BITNET_X86_TL2)",
+            ctor_code,
+            *tbl_impl_code,
+            api_code,
+            trans_code,
+            "#endif"
+        ]
+        f.writelines(lines)
 
     config = ConfigParser()
 
@@ -753,5 +755,5 @@ if __name__ == "__main__":
         config.set('Kernels_{}'.format(i), 'BK'.format(i), str(BK_list[i]))
         config.set('Kernels_{}'.format(i), 'bmm'.format(i), str(bm_list[i]))
 
-    with open(''.join([output_dir, "/kernel_config.ini"]), 'w') as configfile:
+    with open(os.path.join(output_dir, "kernel_config.ini"), 'w') as configfile:
         config.write(configfile)
