@@ -12,11 +12,8 @@ import argparse
 import contextlib
 import json
 import os
-import re
-import sys
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from pathlib import Path
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, Callable, ContextManager, Iterator, Sequence, TypeVar, cast, Tuple, Iterable
 
