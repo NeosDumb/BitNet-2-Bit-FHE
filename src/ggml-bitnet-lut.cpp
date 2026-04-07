@@ -7,7 +7,6 @@
 
 #include "ggml-bitnet.h"
 #include "ggml-quants.h"
-#include "bitnet-lut-kernels.h"
 
 #if defined(GGML_BITNET_ARM_TL1)
 
