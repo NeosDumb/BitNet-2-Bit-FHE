@@ -71,12 +71,14 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
-            uint32_t val_int = src_int[src_idx];
+            float val = src[src_idx];
+            max = fmaxf(max, fabsf(val));
 
-            uint32_t abs_val = val_int & 0x7FFFFFFF;
-            if (abs_val > max_int) max_int = abs_val;
-
-            uint8_t q_val = (abs_val < 0x358637bd) ? 1 : ((~val_int >> 30) & 2);
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop,
+            // allowing the compiler to emit vectorized conditional moves instead of jumps.
+            uint8_t q_val = (val > 1e-6f) - (val < -1e-6f) + 1;
 
             int group_idx = j / 32;
             int group_pos = j % 32;
@@ -112,25 +114,23 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
 
         // Optimization: IEEE-754 integer bit manipulation mapping
         for (int64_t col = 0; col < n_per_row; col++) {
-            uint32_t vi0 = src_int[r0 * n_per_row + col];
-            uint32_t vi1 = src_int[r1 * n_per_row + col];
-            uint32_t vi2 = src_int[r2 * n_per_row + col];
-            uint32_t vi3 = src_int[r3 * n_per_row + col];
+            float v0 = src[r0 * n_per_row + col];
+            float v1 = src[r1 * n_per_row + col];
+            float v2 = src[r2 * n_per_row + col];
+            float v3 = src[r3 * n_per_row + col];
 
-            uint32_t abs0 = vi0 & 0x7FFFFFFF;
-            uint32_t abs1 = vi1 & 0x7FFFFFFF;
-            uint32_t abs2 = vi2 & 0x7FFFFFFF;
-            uint32_t abs3 = vi3 & 0x7FFFFFFF;
+            max = fmaxf(max, fabsf(v0));
+            max = fmaxf(max, fabsf(v1));
+            max = fmaxf(max, fabsf(v2));
+            max = fmaxf(max, fabsf(v3));
 
-            if (abs0 > max_int) max_int = abs0;
-            if (abs1 > max_int) max_int = abs1;
-            if (abs2 > max_int) max_int = abs2;
-            if (abs3 > max_int) max_int = abs3;
-
-            uint8_t q0 = (abs0 < 0x358637bd) ? 1 : ((~vi0 >> 30) & 2);
-            uint8_t q1 = (abs1 < 0x358637bd) ? 1 : ((~vi1 >> 30) & 2);
-            uint8_t q2 = (abs2 < 0x358637bd) ? 1 : ((~vi2 >> 30) & 2);
-            uint8_t q3 = (abs3 < 0x358637bd) ? 1 : ((~vi3 >> 30) & 2);
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop.
+            uint8_t q0 = (v0 > 1e-6f) - (v0 < -1e-6f) + 1;
+            uint8_t q1 = (v1 > 1e-6f) - (v1 < -1e-6f) + 1;
+            uint8_t q2 = (v2 > 1e-6f) - (v2 < -1e-6f) + 1;
+            uint8_t q3 = (v3 > 1e-6f) - (v3 < -1e-6f) + 1;
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -156,12 +156,13 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
     for (int i = 0; i < n / QK_I2_S; i++) {
         for (int j = 0; j < QK_I2_S; j++) {
             int src_idx = i * QK_I2_S + j;
-            uint32_t val_int = src_int[src_idx];
-            uint32_t abs_val = val_int & 0x7FFFFFFF;
+            float val = src[src_idx];
+            max = fmaxf(max, fabsf(val));
 
-            if (abs_val > max_int) max_int = abs_val;
-
-            uint8_t q_val = (abs_val < 0x358637bd) ? 1 : ((~val_int >> 30) & 2);
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop.
+            uint8_t q_val = (val > 1e-6f) - (val < -1e-6f) + 1;
 
             int group_idx = j / 16;
             int group_pos = j % 16;
