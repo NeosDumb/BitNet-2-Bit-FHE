@@ -73,12 +73,11 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             float val = src[src_idx];
             max = fmaxf(max, fabsf(val));
 
-            uint8_t q_val;
-            if (fabsf(val) < 1e-6f) {
-                q_val = 1;
-            } else {
-                q_val = val > 0.0f ? 2 : 0;
-            }
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop,
+            // allowing the compiler to emit vectorized conditional moves instead of jumps.
+            uint8_t q_val = (val > 1e-6f) - (val < -1e-6f) + 1;
 
             int group_idx = j / 32;
             int group_pos = j % 32;
@@ -123,10 +122,13 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             max = fmaxf(max, fabsf(v2));
             max = fmaxf(max, fabsf(v3));
 
-            uint8_t q0 = fabsf(v0) < 1e-6f ? 1 : (v0 > 0.0f ? 2 : 0);
-            uint8_t q1 = fabsf(v1) < 1e-6f ? 1 : (v1 > 0.0f ? 2 : 0);
-            uint8_t q2 = fabsf(v2) < 1e-6f ? 1 : (v2 > 0.0f ? 2 : 0);
-            uint8_t q3 = fabsf(v3) < 1e-6f ? 1 : (v3 > 0.0f ? 2 : 0);
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop.
+            uint8_t q0 = (v0 > 1e-6f) - (v0 < -1e-6f) + 1;
+            uint8_t q1 = (v1 > 1e-6f) - (v1 < -1e-6f) + 1;
+            uint8_t q2 = (v2 > 1e-6f) - (v2 < -1e-6f) + 1;
+            uint8_t q3 = (v3 > 1e-6f) - (v3 < -1e-6f) + 1;
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -154,12 +156,10 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             float val = src[src_idx];
             max = fmaxf(max, fabsf(val));
 
-            uint8_t q_val;
-            if (fabsf(val) < 1e-6f) {
-                q_val = 1;
-            } else {
-                q_val = val > 0.0f ? 2 : 0;
-            }
+            // Mathematical Optimization: Branchless Ternary Mapping
+            // Using indicator functions T(x) = 1_{x > \epsilon} - 1_{x < -\epsilon} + 1
+            // This eliminates control flow dependencies and branch mispredictions in a tight loop.
+            uint8_t q_val = (val > 1e-6f) - (val < -1e-6f) + 1;
 
             int group_idx = j / 16;
             int group_pos = j % 16;
