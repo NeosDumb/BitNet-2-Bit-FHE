@@ -49,6 +49,26 @@ static inline int hsum_i32_8(const __m256i a) {
 }
 #endif
 
+// Mathematical optimization: IEEE 754 floating-point branchless ternary quantization
+// Float representation uses sign bit, exponent, and mantissa.
+// A float value f with fabsf(f) < 1e-6f can be bounds-checked via integer subtraction.
+// Reinterpreting the float as uint32_t, dropping the sign bit:
+// 1e-6f is 0x358637BD. If abs_u < 0x358637BD, the subtraction underflows, setting the sign bit (>> 31 = 1).
+// For sign tracking, the 31st bit (sign bit of the float) determines positive/negative.
+// We extract it, flip it (so positive is 1, negative is 0), and multiply by 2 (shift left 1).
+// This generates branchless ternary scalar assignment:
+// |val| < 1e-6 -> 1
+// val > 1e-6  -> 2
+// val < -1e-6 -> 0
+static inline uint8_t quantize_ternary_branchless(float val) {
+    uint32_t val_u;
+    memcpy(&val_u, &val, sizeof(uint32_t));
+    uint32_t abs_u = val_u & 0x7FFFFFFF;
+    uint32_t is_small = (abs_u - 0x358637BD) >> 31;
+    uint32_t sign_val = ((~val_u) >> 30) & 2;
+    return is_small | (sign_val & (is_small - 1));
+}
+
 size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
 #if defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__) || defined(__SSSE3__)
 #if defined(ACT_PARALLEL)
