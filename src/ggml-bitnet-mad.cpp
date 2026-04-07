@@ -48,6 +48,26 @@ static inline int hsum_i32_8(const __m256i a) {
 }
 #endif
 
+// Mathematical optimization: IEEE 754 floating-point branchless ternary quantization
+// Float representation uses sign bit, exponent, and mantissa.
+// A float value f with fabsf(f) < 1e-6f can be bounds-checked via integer subtraction.
+// Reinterpreting the float as uint32_t, dropping the sign bit:
+// 1e-6f is 0x358637BD. If abs_u < 0x358637BD, the subtraction underflows, setting the sign bit (>> 31 = 1).
+// For sign tracking, the 31st bit (sign bit of the float) determines positive/negative.
+// We extract it, flip it (so positive is 1, negative is 0), and multiply by 2 (shift left 1).
+// This generates branchless ternary scalar assignment:
+// |val| < 1e-6 -> 1
+// val > 1e-6  -> 2
+// val < -1e-6 -> 0
+static inline uint8_t quantize_ternary_branchless(float val) {
+    uint32_t val_u;
+    memcpy(&val_u, &val, sizeof(uint32_t));
+    uint32_t abs_u = val_u & 0x7FFFFFFF;
+    uint32_t is_small = (abs_u - 0x358637BD) >> 31;
+    uint32_t sign_val = ((~val_u) >> 30) & 2;
+    return is_small | (sign_val & (is_small - 1));
+}
+
 size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
 #if defined(__AVX__) || defined(__AVX2__) || defined(__AVX512F__) || defined(__SSSE3__)
 #if defined(ACT_PARALLEL)
@@ -73,12 +93,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             float val = src[src_idx];
             max = fmaxf(max, fabsf(val));
 
-            uint8_t q_val;
-            if (fabsf(val) < 1e-6f) {
-                q_val = 1;
-            } else {
-                q_val = val > 0.0f ? 2 : 0;
-            }
+            uint8_t q_val = quantize_ternary_branchless(val);
 
             int group_idx = j / 32;
             int group_pos = j % 32;
@@ -123,10 +138,10 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             max = fmaxf(max, fabsf(v2));
             max = fmaxf(max, fabsf(v3));
 
-            uint8_t q0 = fabsf(v0) < 1e-6f ? 1 : (v0 > 0.0f ? 2 : 0);
-            uint8_t q1 = fabsf(v1) < 1e-6f ? 1 : (v1 > 0.0f ? 2 : 0);
-            uint8_t q2 = fabsf(v2) < 1e-6f ? 1 : (v2 > 0.0f ? 2 : 0);
-            uint8_t q3 = fabsf(v3) < 1e-6f ? 1 : (v3 > 0.0f ? 2 : 0);
+            uint8_t q0 = quantize_ternary_branchless(v0);
+            uint8_t q1 = quantize_ternary_branchless(v1);
+            uint8_t q2 = quantize_ternary_branchless(v2);
+            uint8_t q3 = quantize_ternary_branchless(v3);
 
             uint8_t packed = (uint8_t)((q0 << 6) | (q1 << 4) | (q2 << 2) | (q3 << 0));
             out[base + col] = packed;
@@ -154,12 +169,7 @@ size_t quantize_i2_s(const float * src, void * dst, int64_t nrow, int64_t n_per_
             float val = src[src_idx];
             max = fmaxf(max, fabsf(val));
 
-            uint8_t q_val;
-            if (fabsf(val) < 1e-6f) {
-                q_val = 1;
-            } else {
-                q_val = val > 0.0f ? 2 : 0;
-            }
+            uint8_t q_val = quantize_ternary_branchless(val);
 
             int group_idx = j / 16;
             int group_pos = j % 16;
