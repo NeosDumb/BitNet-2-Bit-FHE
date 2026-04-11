@@ -227,11 +227,11 @@ class Params:
 
         # try transformer naming first
         if "model.layers.0.self_attn.q_proj.weight" in model:
-            n_layer = max((int(k.split('.')[2]) for k in model if k.startswith("model.layers.") and k.endswith(".self_attn.q_proj.weight")), default=-1) + 1
+            n_layer = next(i for i in itertools.count() if f"model.layers.{i}.self_attn.q_proj.weight" not in model)
         elif "model.layers.0.self_attn.W_pack.weight" in model:   # next: try baichuan naming
-            n_layer = max((int(k.split('.')[2]) for k in model if k.startswith("model.layers.") and k.endswith(".self_attn.W_pack.weight")), default=-1) + 1
+            n_layer = next(i for i in itertools.count() if f"model.layers.{i}.self_attn.W_pack.weight" not in model)
         else:
-            n_layer = max((int(k.split('.')[1]) for k in model if k.startswith("layers.") and k.endswith(".attention.wq.weight")), default=-1) + 1
+            n_layer = next(i for i in itertools.count() if f"layers.{i}.attention.wq.weight" not in model)
 
         if n_layer < 1:
             msg = """\
