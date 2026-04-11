@@ -31,7 +31,10 @@ from sentencepiece import SentencePieceProcessor
 if 'NO_LOCAL_GGUF' not in os.environ:
     sys.path.insert(1, str(Path(__file__).parent / 'gguf-py'))
 import gguf
-from convert_utils import permute
+from convert_utils import (
+    permute, DataType, UnquantizedDataType, QuantizedDataType, Q8_0QuantizedDataType,
+    DT_F16, DT_F32, DT_I32, DT_BF16, DT_I2, DT_Q8_0, LlamaFileType, LLAMA_FILE_TYPE_TO_DATA_TYPE,
+)
 
 if TYPE_CHECKING:
     from typing_extensions import Self, TypeAlias
@@ -54,108 +57,6 @@ FAST_TOKENIZER_FILE = 'tokenizer.json'
 # data types
 #
 
-
-@dataclass(frozen=True)
-class DataType:
-    name: str
-    dtype: np.dtype[Any]
-    valid_conversions: list[str]
-
-    def elements_to_bytes(self, n_elements: int) -> int:
-        return n_elements * self.dtype.itemsize
-
-
-@dataclass(frozen=True)
-class UnquantizedDataType(DataType):
-    pass
-
-
-DT_F16  = UnquantizedDataType('F16',  dtype = np.dtype(np.float16), valid_conversions = ['F32', 'Q8_0'])
-DT_F32  = UnquantizedDataType('F32',  dtype = np.dtype(np.float32), valid_conversions = ['F16', 'Q8_0', 'I2'])
-DT_I32  = UnquantizedDataType('I32',  dtype = np.dtype(np.int16),   valid_conversions = [])
-DT_BF16 = UnquantizedDataType('BF16', dtype = np.dtype(np.uint16),  valid_conversions = ['F32', 'F16', 'Q8_0'])
-DT_I2   = UnquantizedDataType('I2',   dtype = np.dtype(np.uint8),   valid_conversions = ['F32', 'F16', 'Q8_0'])
-
-@dataclass(frozen=True)
-class QuantizedDataType(DataType):
-    block_size: int
-    quantized_dtype: np.dtype[Any]
-    ggml_type: gguf.GGMLQuantizationType
-
-    def quantize(self, arr: NDArray) -> NDArray:
-        raise NotImplementedError(f'Quantization for {self.name} not implemented')
-
-    def elements_to_bytes(self, n_elements: int) -> int:
-        assert n_elements % self.block_size == 0, f'Invalid number of elements {n_elements} for {self.name} with block size {self.block_size}'
-        return self.quantized_dtype.itemsize * (n_elements // self.block_size)
-
-
-@dataclass(frozen=True)
-class Q8_0QuantizedDataType(QuantizedDataType):
-    # Mini Q8_0 quantization in Python!
-    def quantize(self, arr: NDArray) -> NDArray:
-        assert arr.size % self.block_size == 0 and arr.size != 0, f'Bad array size {arr.size}'
-        assert arr.dtype == np.float32, f'Bad array type {arr.dtype}'
-        n_blocks = arr.size // self.block_size
-        blocks = arr.reshape((n_blocks, self.block_size))
-        # Much faster implementation of block quantization contributed by @Cebtenzzre
-
-        def quantize_blocks_q8_0(blocks: NDArray) -> Iterable[tuple[Any, Any]]:
-            d = abs(blocks).max(axis = 1) / np.float32(127)
-            with np.errstate(divide = 'ignore'):
-                qs = (blocks / d[:, None]).round()
-            qs[d == 0] = 0
-            yield from zip(d, qs)
-        return np.fromiter(quantize_blocks_q8_0(blocks), count = n_blocks, dtype = self.quantized_dtype)
-
-# @dataclass(frozen=True)
-# class TransformedDataType(DataType):
-#     transformed_dtype: np.dtype[Any]
-
-#     def transform(self, arr: NDArray) -> NDArray:
-#         raise NotImplementedError(f'Transformation for {self.name} not implemented')
-
-# @dataclass(frozen=True)
-# class I2TransformedDataType(TransformedDataType):
-#     # fp32 -> int2 (dtype is uint8)
-#     def transform(self, arr: NDArray) -> NDArray:
-#         assert(np.prod(arr.shape) % 4 == 0)
-#         # Much faster implementation of block quantization contributed by @Cebtenzzre
-
-#         def transform_to_i2(x : NDArray) -> Iterable[tuple[Any, Any]]:
-#             x_num = np.prod(x.shape)
-#             x = np.reshape(x, x_num)
-#             for i in range(x_num):
-#                 if x[i] != 0:
-#                     d = x[i]
-#                     break
-#             x = np.divide(x, d)
-#             x = x.astype(np.uint8)
-#             x = np.reshape(x, [x.shape[0] // 4, 4])
-#             keep_bit = {0:192, 1:48, 2:12, 3:3}
-#             ans = np.zeros([x_num // 4], dtype=np.uint8)
-#             for i in range(4):
-#                 x_bit_col = x[:, i]
-#                 x_bit_shift = np.left_shift(x_bit_col, 6 - i * 2)
-#                 x_bit_shift = np.bitwise_and(x_bit_shift, keep_bit[i])
-#                 ans = np.bitwise_or(ans, x_bit_shift)
-#             return ans
-#         return transform_to_i2(arr)
-
-#     def elements_to_bytes(self, n_elements: int) -> int:
-#         return n_elements // 4
-
-
-DT_Q8_0 = Q8_0QuantizedDataType('Q8_0',
-                                dtype = np.dtype(np.float32), valid_conversions = [],
-                                ggml_type = gguf.GGMLQuantizationType.Q8_0, block_size = 32,
-                                quantized_dtype = np.dtype([('d', '<f2'), ('qs', 'i1', (32,))]))
-
-# DT_I2 = I2TransformedDataType('I2',
-#                               dtype = np.dtype(np.float32), valid_conversions = [],
-#                               transformed_dtype = np.uint8
-#                               )
-
 # Quantized types skipped here because they may also map to np.float32
 NUMPY_TYPE_TO_DATA_TYPE: dict[np.dtype[Any], DataType] = {}
 for dt in (DT_BF16, DT_F16, DT_F32, DT_I32, DT_I2):
@@ -170,8 +71,8 @@ SAFETENSORS_DATA_TYPES: dict[str, DataType] = {
     'I32': DT_I32,
 }
 
-def type_for_tensor(ftype: gguf.LlamaFileType, name: str, tensor: LazyTensor) -> DataType:
-    dt = GGML_FILE_TYPE_TO_DATA_TYPE.get(ftype)
+def type_for_tensor(ftype: LlamaFileType, name: str, tensor: LazyTensor) -> DataType:
+    dt = LLAMA_FILE_TYPE_TO_DATA_TYPE.get(ftype)
     if dt is None:
         raise ValueError(ftype)
     # Convert all 1D tensors to F32.  Most of the codebase that takes in 1D tensors only handles F32 tensors, and most of the outputs tensors are F32.
@@ -180,14 +81,6 @@ def type_for_tensor(ftype: gguf.LlamaFileType, name: str, tensor: LazyTensor) ->
     if name == "token_embd.weight" or name == "output.weight":
         dt = DT_F32
     return dt
-
-
-GGML_FILE_TYPE_TO_DATA_TYPE: dict[gguf.LlamaFileType, DataType] = {
-    gguf.LlamaFileType.ALL_F32:     DT_F32,
-    gguf.LlamaFileType.MOSTLY_F16:  DT_F16,
-    gguf.LlamaFileType.MOSTLY_Q4_0: DT_I2,
-    gguf.LlamaFileType.MOSTLY_Q8_0: DT_Q8_0,
-}
 
 #
 # hparams loading
@@ -213,7 +106,7 @@ class Params:
     n_orig_ctx: int | None = None
     rope_finetuned: bool | None = None
 
-    ftype: gguf.LlamaFileType | None = None
+    ftype: LlamaFileType | None = None
 
     # path to the directory containing the model files
     path_model: Path | None = None
@@ -1231,14 +1124,14 @@ class OutputFile:
     def write_tensor_info(self) -> None:
         self.gguf.write_ti_data_to_file()
 
-    def write_tensor_data(self, ftype: gguf.LlamaFileType, model: LazyModel, concurrency: int) -> None:
+    def write_tensor_data(self, ftype: LlamaFileType, model: LazyModel, concurrency: int) -> None:
         ndarrays_inner = bounded_parallel_map(OutputFile.do_item, model.items(), concurrency=concurrency)
-        if ftype == gguf.LlamaFileType.MOSTLY_Q8_0:
+        if ftype == LlamaFileType.MOSTLY_Q8_0:
             ndarrays = bounded_parallel_map(
                 OutputFile.maybe_do_quantize, ndarrays_inner, concurrency=concurrency, max_workers=concurrency,
                 use_processpool_executor=True,
             )
-        # elif ftype == gguf.LlamaFileType.MOSTLY_Q4_0:
+        # elif ftype == LlamaFileType.MOSTLY_I2_S:
         #     # ndarrays = bounded_parallel_map(
         #     #     OutputFile.maybe_do_transform, ndarrays_inner, concurrency=concurrency, max_workers=concurrency, use_processpool_executor=True,)
         #     ndarrays = map(OutputFile.maybe_do_transform, ndarrays_inner)
@@ -1299,7 +1192,7 @@ class OutputFile:
 
     @staticmethod
     def write_all(
-        fname_out: Path, ftype: gguf.LlamaFileType, params: Params, model: LazyModel, vocab: BaseVocab, svocab: gguf.SpecialVocab,
+        fname_out: Path, ftype: LlamaFileType, params: Params, model: LazyModel, vocab: BaseVocab, svocab: gguf.SpecialVocab,
         concurrency: int = DEFAULT_CONCURRENCY, endianess: gguf.GGUFEndian = gguf.GGUFEndian.LITTLE,
         pad_vocab: bool = False,
     ) -> None:
@@ -1331,24 +1224,24 @@ class OutputFile:
         of.close()
 
 
-def pick_output_type(model: LazyModel, output_type_str: str | None) -> gguf.LlamaFileType:
+def pick_output_type(model: LazyModel, output_type_str: str | None) -> LlamaFileType:
     wq_type = model[gguf.TENSOR_NAMES[gguf.MODEL_TENSOR.ATTN_Q].format(bid=0) + ".weight"].data_type
 
     if output_type_str == "f32" or (output_type_str is None and wq_type in (DT_F32, DT_BF16)):
-        return gguf.LlamaFileType.ALL_F32
+        return LlamaFileType.ALL_F32
     if output_type_str == "f16" or (output_type_str is None and wq_type == DT_F16):
-        return gguf.LlamaFileType.MOSTLY_F16
+        return LlamaFileType.MOSTLY_F16
     if output_type_str == "q8_0":
-        return gguf.LlamaFileType.MOSTLY_Q8_0
+        return LlamaFileType.MOSTLY_Q8_0
     if output_type_str == "i2":
-        return gguf.LlamaFileType.MOSTLY_Q4_0
+        return LlamaFileType.MOSTLY_I2_S
 
     name_to_type = {name: lazy_tensor.data_type for (name, lazy_tensor) in model.items()}
 
     raise ValueError(f"Unexpected combination of types: {name_to_type}")
 
 
-def convert_to_output_type(model: LazyModel, output_type: gguf.LlamaFileType) -> LazyModel:
+def convert_to_output_type(model: LazyModel, output_type: LlamaFileType) -> LazyModel:
     # for (name, tensor) in model.items():
     #     print(name)
     #     print(tensor)
@@ -1609,12 +1502,12 @@ class VocabFactory:
         return vocab, special_vocab
 
 
-def default_outfile(model_paths: list[Path], file_type: gguf.LlamaFileType) -> Path:
+def default_outfile(model_paths: list[Path], file_type: LlamaFileType) -> Path:
     namestr = {
-        gguf.LlamaFileType.ALL_F32:    "f32",
-        gguf.LlamaFileType.MOSTLY_F16: "f16",
-        gguf.LlamaFileType.MOSTLY_Q8_0:"q8_0",
-        gguf.LlamaFileType.MOSTLY_Q4_0:  "i2",
+        LlamaFileType.ALL_F32:    "f32",
+        LlamaFileType.MOSTLY_F16: "f16",
+        LlamaFileType.MOSTLY_Q8_0:"q8_0",
+        LlamaFileType.MOSTLY_I2_S: "i2",
     }[file_type]
     ret = model_paths[0].parent / f"ggml-model-{namestr}.gguf"
     if ret in model_paths:
@@ -1700,10 +1593,10 @@ def main(args_in: list[str] | None = None) -> None:
 
     if args.outtype:
         params.ftype = {
-            "f32": gguf.LlamaFileType.ALL_F32,
-            "f16": gguf.LlamaFileType.MOSTLY_F16,
-            "i2" : gguf.LlamaFileType.MOSTLY_Q4_0,
-            "q8_0": gguf.LlamaFileType.MOSTLY_Q8_0,
+            "f32": LlamaFileType.ALL_F32,
+            "f16": LlamaFileType.MOSTLY_F16,
+            "i2" : LlamaFileType.MOSTLY_I2_S,
+            "q8_0": LlamaFileType.MOSTLY_Q8_0,
         }[args.outtype]
 
     if args.model_name:
