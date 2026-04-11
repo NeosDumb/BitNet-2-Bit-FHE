@@ -3,9 +3,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
-import json
 import os
-import readline  # type: ignore # noqa
 import sys
 import time
 from dataclasses import dataclass
