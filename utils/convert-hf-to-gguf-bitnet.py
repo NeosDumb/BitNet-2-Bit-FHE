@@ -482,8 +482,7 @@ def preprocess_weights_tl1(
 
     M, K = w.shape
     weight = w
-    weight = np.where(np.abs(weight) < 1e-6, 0, weight).astype(np.float32)
-    weight = np.sign(weight)
+    weight = (weight > 1e-6).astype(np.int8) - (weight < -1e-6).astype(np.int8)
     weight_num = np.prod(weight.shape)
 
     config.read('include/kernel_config.ini')
@@ -550,8 +549,7 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     third_weight = split_weights[2]
 
     weight = np.reshape((first_weight + second_weight + third_weight), weight_num // 3)
-    sign_weight = np.sign(weight) + 2
-    sign_weight = np.where(sign_weight > 1, 0, sign_weight)
+    sign_weight = (weight < -1e-6).astype(np.uint8)
     weight = np.abs(weight)
 
     weight = np.reshape(weight, (M, K // 3)).astype(np.uint8)
@@ -600,8 +598,7 @@ def preprocess_weights_tl2(
 
     M, K = w.shape
     weight = w
-    weight = np.where(np.abs(weight) < 1e-6, 0, weight).astype(np.float32)
-    weight = np.sign(weight)
+    weight = (weight > 1e-6).astype(np.int8) - (weight < -1e-6).astype(np.int8)
     weight_num = np.prod(weight.shape)
 
     config.read('include/kernel_config.ini')
