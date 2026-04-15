@@ -797,10 +797,14 @@ class BitnetModel(Model):
 
     def weight_quant(self, weight):
         dtype = weight.dtype
-        weight = weight.float()
-        s =  1 / weight.abs().mean().clamp(min=1e-5)
-        result = (weight * s).round().clamp(-1, 1) / s
-        return result.type(dtype)
+        # Mathematical Optimization: Principle of Least Action (Memory Conservation)
+        # Instead of chained operations allocating large intermediate tensors (energy tax),
+        # we cast to float32 once and reuse the memory with in-place operations.
+        # This acts as a closed thermodynamic system minimizing entropy (allocation overhead).
+        weight_fp = weight.float()
+        scale = weight_fp.abs().mean().clamp_(min=1e-5)
+        result = weight_fp.div_(scale).round_().clamp_(-1, 1).mul_(scale)
+        return result.to(dtype)
 
     def transform_to_tl1(self, x: np.ndarray):
         scale = np.max(np.abs(x))
