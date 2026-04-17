@@ -14,6 +14,7 @@ from typing import (
     Union,
 )
 
+import re
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 
@@ -176,29 +177,29 @@ class Tokenizer:
         Splits the string `s` so that each substring contains no more than `max_consecutive_slice_len`
         consecutive whitespaces or consecutive non-whitespaces.
         """
-        current_slice_len = 0
-        current_slice_is_space = s[0].isspace() if len(s) > 0 else False
+        if not s:
+            yield ""
+            return
+
         slice_start = 0
-
-        for i in range(len(s)):
-            is_now_space = s[i].isspace()
-
-            if current_slice_is_space ^ is_now_space:
-                current_slice_len = 1
-                current_slice_is_space = is_now_space
-            else:
-                current_slice_len += 1
-                if current_slice_len > max_consecutive_slice_len:
-                    yield s[slice_start:i]
-                    slice_start = i
-                    current_slice_len = 1
+        pattern = re.compile(
+            rf"\s{{{max_consecutive_slice_len+1},}}|\S{{{max_consecutive_slice_len+1},}}"
+        )
+        for match in pattern.finditer(s):
+            run_start, run_end = match.span()
+            yield s[slice_start : run_start + max_consecutive_slice_len]
+            curr = run_start + max_consecutive_slice_len
+            while run_end - curr > max_consecutive_slice_len:
+                yield s[curr : curr + max_consecutive_slice_len]
+                curr += max_consecutive_slice_len
+            slice_start = curr
         yield s[slice_start:]
 
 class ChatFormat:
     def __init__(self, tokenizer: Tokenizer):
         self.tokenizer = tokenizer
         self.eot_id = tokenizer.special_tokens["<|eot_id|>"]
-    
+
     def decode(self, tokens: List[int]) -> str:
         # Decode the tokens to a string.
         decoded_str = self.tokenizer.decode(tokens)
@@ -250,7 +251,7 @@ class ChatFormat:
         # Add the start of an assistant message for the model to complete.
         if completion:
             tokens.extend(self.encode_header({"role": "assistant", "content": ""}))
-        
+
         if return_target:
             return tokens, targets
 
