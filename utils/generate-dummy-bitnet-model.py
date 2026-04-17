@@ -550,11 +550,11 @@ def preprocess_weights_tl1(
     bmGQA = 32
     byGQA = 8
 
-    weight = np.reshape(weight, (weight_num // 2, 2))
-    hi_weight = np.multiply(np.split(weight, 2, axis=1)[0], 3)
-    lo_weight = np.split(weight, 2, axis=1)[1]
-
-    weight = np.reshape((hi_weight + lo_weight), weight_num // 2)
+    # Mathematical Optimization: Horner's method on 1D strided views.
+    # Evaluates P(x) = x_0 * 3 + x_1 using zero-copy stride arithmetic,
+    # eliminating O(N) array splits and intermediate matrix allocations.
+    weight_flat = weight.ravel()
+    weight = weight_flat[0::2] * 3 + weight_flat[1::2]
 
     # row-major index
     weight = weight + 4
@@ -571,11 +571,11 @@ def preprocess_weights_tl1(
 
 
 def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
-    weight = np.reshape(weight, (weight_num // 2, 2))
-    hi_weight = np.multiply(np.split(weight, 2, axis=1)[0], 3)
-    lo_weight = np.split(weight, 2, axis=1)[1]
-
-    weight = np.reshape((hi_weight + lo_weight), weight_num // 2)
+    # Mathematical Optimization: Horner's method on 1D strided views.
+    # Evaluates P(x) = x_0 * 3 + x_1 using zero-copy stride arithmetic,
+    # eliminating O(N) array splits and intermediate matrix allocations.
+    weight_flat = weight.ravel()
+    weight = weight_flat[0::2] * 3 + weight_flat[1::2]
 
     # row-major index
     weight = weight + 4
@@ -614,13 +614,12 @@ def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_w
                     final_weight.append(func_weight)
 
 def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
-    weight = np.reshape(weight, (weight_num // 3, 3))
-    split_weights = np.split(weight, 3, axis=1)
-    first_weight = np.multiply(split_weights[0], 9)
-    second_weight = np.multiply(split_weights[1], 3)
-    third_weight = split_weights[2]
+    # Mathematical Optimization: Horner's method on 1D strided views.
+    # Evaluates P(x) = (x_0 * 3 + x_1) * 3 + x_2 using zero-copy stride
+    # arithmetic, eliminating O(N) array splits and matrix allocations.
+    weight_flat = weight.ravel()
+    weight = (weight_flat[0::3] * 3 + weight_flat[1::3]) * 3 + weight_flat[2::3]
 
-    weight = np.reshape((first_weight + second_weight + third_weight), weight_num // 3)
     sign_weight = (weight < -1e-6).astype(np.uint8)
     weight = np.abs(weight)
 
