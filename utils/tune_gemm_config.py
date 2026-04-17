@@ -318,18 +318,23 @@ def main():
         configurations = []
         while True:
             print("\nEnter configuration (or 'done' to finish):")
-            act = input("ACT_PARALLEL (y/n): ").strip().lower() == 'y'
-            if input == 'done':
+            user_input = input("ACT_PARALLEL (y/n) or 'done': ").strip().lower()
+            if user_input == 'done':
                 break
-            row = int(input("ROW_BLOCK_SIZE: "))
-            col = int(input("COL_BLOCK_SIZE: "))
-            par = int(input("PARALLEL_SIZE: "))
-            configurations.append({
-                'act_parallel': act,
-                'row_block_size': row,
-                'col_block_size': col,
-                'parallel_size': par
-            })
+
+            act = user_input == 'y'
+            try:
+                row = int(input("ROW_BLOCK_SIZE: "))
+                col = int(input("COL_BLOCK_SIZE: "))
+                par = int(input("PARALLEL_SIZE: "))
+                configurations.append({
+                    'act_parallel': act,
+                    'row_block_size': row,
+                    'col_block_size': col,
+                    'parallel_size': par
+                })
+            except ValueError:
+                print("❌ Invalid input. Please enter numeric values for block sizes and parallel size.")
     elif args.quick:
         # Quick test mode - test only a few key configurations
         configurations = [
