@@ -493,32 +493,17 @@ class Model(ABC):
 # TL1
 
 def process_tl1(weight, BM, BY, bm, by, M, K):
-    final_weight = []
-
-    # split in row with size of BM (160)
-    outer_BM_weights = np.split(weight, (M // BM), axis=0)
-    for outer_BM_weight in outer_BM_weights:
-        # split in col with size of by (16index * 2 == 32nums)
-        outer_BY_weights = np.split(outer_BM_weight, (K // BY), axis=1)
-        for outer_BY_weight in outer_BY_weights:
-            # split in row with size of bm (32)
-            inner_bm_weights = np.split(outer_BY_weight, (BM // bm), axis=0)
-            for inner_bm_weight in inner_bm_weights:
-                # split in col with size of by (2index * 2 == 4nums)
-                inner_by_weights = np.split(inner_bm_weight, (BY // by), axis=1)
-                for inner_by_weight in inner_by_weights:
-                    # 16 * 6 minor
-                    minor_bm_weights = np.split(inner_by_weight, (bm // 16), axis=0)
-                    for minor_bm_weight in minor_bm_weights:
-                        minor_by_weights = np.split(minor_bm_weight, (by // 4), axis=1)
-                        for minor in minor_by_weights:
-                            minor_weight = np.split(minor, 2, axis=1)
-                            hi_weight = minor_weight[0].astype(np.uint8) << 4
-                            lo_weight = minor_weight[1].astype(np.uint8)
-                            func_weight = lo_weight + hi_weight
-                            final_weight.append(func_weight)
-
-    weight = np.array(final_weight, dtype=np.uint8)
+    weight = weight.reshape((M, K // 2)).astype(np.uint8)
+    weight = weight.reshape((M // BM, BM, K // 2)).transpose(0, 2, 1)
+    weight = weight.reshape((M // BM, K // BY, BY // 2, BM)).transpose(0, 1, 3, 2)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 2)).transpose(0, 1, 2, 4, 3)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 2, bm)).transpose(0, 1, 2, 3, 5, 4)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm // 16, 16, by // 2)).transpose(0, 1, 2, 3, 4, 6, 5)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm // 16, by // 4, 4 // 2, 16)).transpose(0, 1, 2, 3, 4, 5, 7, 6)
+    weight = weight.reshape((M * K // 16 // 4, 16, 4 // 2))
+    weight_0 = weight[:, :, 0] << 4
+    weight_1 = weight[:, :, 1]
+    weight = weight_0 + weight_1
     return weight
 
 # based on t_mac.utils.preprocess_weights
@@ -581,37 +566,21 @@ def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_w
     weight = weight + 4
     weight = np.reshape(weight, (M, K // 2)).astype(np.uint8)
 
-    outer_BM_weights = np.split(weight, (M // BM), axis=0)
-    for outer_BM_weight in outer_BM_weights:
-        # split in col with size of by (32index * 3 == 96nums)
-        outer_BY_weights = np.split(outer_BM_weight, (K // BY), axis=1)
-        for outer_BY_weight in outer_BY_weights:
-            # split in row with size of bm (32)
-            inner_bm_weights = np.split(outer_BY_weight, (BM // bm), axis=0)
-            for inner_bm_weight in inner_bm_weights:
-                # split in col with size of by (2index * 2 == 4nums)
-                inner_by_weights = np.split(inner_bm_weight, (BY // by), axis=1)
-                for inner_by_weight in inner_by_weights:
-                    func_weights = np.split(inner_by_weight, 2, axis=1)
+    weight = weight.reshape((M // BM, BM, K // 2)).transpose(0, 2, 1)
+    weight = weight.reshape((M // BM, K // BY, BY // 2, BM)).transpose(0, 1, 3, 2)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 2)).transpose(0, 1, 2, 4, 3)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 2, bm)).transpose(0, 1, 2, 3, 5, 4)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm, by // 2))
+    weight_0 = weight[:, :, :, :, :, 0]
+    weight_1 = weight[:, :, :, :, :, 1]
+    weight_0 = weight_0 << 4
+    weight_1 = weight_1
+    weight = weight_0 + weight_1
+    weight = weight.reshape((M * K // bm // by, bm // 8, 8))
+    weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
+    weight = weight.reshape(M * K // bm // by, bm)
 
-                    left_weight = func_weights[0]
-                    left_sub_weights = np.split(left_weight, 4, axis=0)
-                    new_left_weight = np.reshape(
-                                        np.concatenate([left_sub_weights[0], left_sub_weights[2], 
-                                        left_sub_weights[1], left_sub_weights[3]], axis=0, dtype=np.uint8),
-                                        (bm))
-
-                    right_weight = func_weights[1]
-                    right_sub_weights = np.split(right_weight, 4, axis=0)
-                    new_right_weight = np.reshape(
-                                        np.concatenate([right_sub_weights[0], right_sub_weights[2], 
-                                        right_sub_weights[1], right_sub_weights[3]], axis=0, dtype=np.uint8),
-                                        (bm))
-                    hi_weight = new_left_weight.astype(np.uint8) << 4
-                    lo_weight = new_right_weight
-                    func_weight = hi_weight + lo_weight
-                    func_weight = np.reshape(func_weight, bm * by // 4)
-                    final_weight.append(func_weight)
+    final_weight.append(weight)
 
 def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
     # Mathematical Optimization: Horner's method on 1D strided views.
@@ -620,74 +589,43 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     weight_flat = weight.ravel()
     weight = (weight_flat[0::3] * 3 + weight_flat[1::3]) * 3 + weight_flat[2::3]
 
-    sign_weight = (weight < -1e-6).astype(np.uint8)
+    sign_weight = (weight < 0).astype(np.uint8)
     weight = np.abs(weight)
 
     # row-major index
     weight = np.reshape(weight, (M, K // 3)).astype(np.uint8)
     sign_weight = np.reshape(sign_weight, (M, K // 3)).astype(np.uint8)
-    # print(weight)
 
-    # split in row with size of BM (160)
-    outer_BM_weights = np.split(weight, (M // BM), axis=0)
-    for outer_BM_weight in outer_BM_weights:
-        # split in col with size of by (32index * 3 == 96nums)
-        outer_BY_weights = np.split(outer_BM_weight, (K // BY), axis=1)
-        for outer_BY_weight in outer_BY_weights:
-            # split in row with size of bm (32)
-            inner_bm_weights = np.split(outer_BY_weight, (BM // bm), axis=0)
-            for inner_bm_weight in inner_bm_weights:
-                # split in col with size of by (2index * 3 == 6nums)
-                inner_by_weights = np.split(inner_bm_weight, (BY // by), axis=1)
-                for inner_by_weight in inner_by_weights:
-                    func_weights = np.split(inner_by_weight, 2, axis=1)
+    weight = weight.reshape((M // BM, BM, K // 3)).transpose(0, 2, 1)
+    weight = weight.reshape((M // BM, K // BY, BY // 3, BM)).transpose(0, 1, 3, 2)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 3)).transpose(0, 1, 2, 4, 3)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 3, bm)).transpose(0, 1, 2, 3, 5, 4)
+    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm, by // 3))
+    weight_0 = weight[:, :, :, :, :, 0]
+    weight_1 = weight[:, :, :, :, :, 1]
+    weight_0 = weight_0 << 4
+    weight_1 = weight_1
+    weight = weight_0 + weight_1
+    weight = weight.reshape((M * K // bm // by, bm // 8, 8))
+    weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
+    weight = weight.reshape(M * K // bm // by, bm)
 
-                    left_weight = func_weights[0]
-                    left_sub_weights = np.split(left_weight, 4, axis=0)
-                    new_left_weight = np.reshape(
-                                        np.concatenate([left_sub_weights[0], left_sub_weights[2], 
-                                        left_sub_weights[1], left_sub_weights[3]], axis=0, dtype=np.uint8),
-                                        (bm))
+    final_weight.append(weight)
 
-                    right_weight = func_weights[1]
-                    right_sub_weights = np.split(right_weight, 4, axis=0)
+    sign_weight = sign_weight.reshape((M // BM, BM, K // 3)).transpose(0, 2, 1)
+    sign_weight = sign_weight.reshape((M // BM, K // BY, BY // 3, BM)).transpose(0, 1, 3, 2)
+    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 3)).transpose(0, 1, 2, 4, 3)
+    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 4, bm)).transpose(0, 1, 2, 3, 5, 4)
+    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), bm, by // 3 * 4)).transpose(0, 1, 2, 3, 5, 4)
+    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 8, bm // 2)).astype(np.uint16)
+    combine_weight = np.zeros((M // BM, K // BY, BM // bm, BY // (by * 4), bm // 2), dtype=np.uint16)
+    for i in range(16):
+        temp_weight = sign_weight[:, :, :, :, i, :] << 15 - i
+        combine_weight += temp_weight
+    combine_weight = combine_weight.view(np.uint8)
+    combine_weight = combine_weight.reshape((M * K // bm // (by * 4)), bm)
 
-                    new_right_weight = np.reshape(
-                                        np.concatenate([right_sub_weights[0], right_sub_weights[2], 
-                                        right_sub_weights[1], right_sub_weights[3]], axis=0, dtype=np.uint8),
-                                        (bm))
-                    hi_weight = new_left_weight.astype(np.uint8) << 4
-                    lo_weight = new_right_weight
-                    func_weight = hi_weight + lo_weight
-                    func_weight = np.reshape(func_weight, bm * by // 6)
-                    final_weight.append(func_weight)
-
-    sign_weight_list = []
-    sign_outer_BM_weights = np.split(sign_weight, (M // BM), axis=0)
-    for sign_outer_BM_weight in sign_outer_BM_weights:
-        # split in col with size of by (32index * 3 == 96nums)
-        sign_outer_BY_weights = np.split(sign_outer_BM_weight, (K // BY), axis=1)
-        for sign_outer_BY_weight in sign_outer_BY_weights:
-            # split in row with size of bm (32)
-            sign_inner_bm_weights = np.split(sign_outer_BY_weight, (BM // bm), axis=0)
-            for sign_inner_bm_weight in sign_inner_bm_weights:
-                # split in col with size of by (4index * 3 == 12nums)
-                sign_inner_by_weights = np.split(sign_inner_bm_weight, (BY // (by * 4)), axis=1)
-                for sign_inner_by_weight in sign_inner_by_weights:
-                    func_weight = np.split(sign_inner_by_weight, 8, axis=1)
-                    combine_weight = np.zeros((16, 1), dtype=np.uint16)
-                    for i in range(len(func_weight)):
-                        min_weight = np.split(func_weight[i], 2)
-                        min_top_weight = min_weight[0].astype(np.uint16) << 15 - (2 * i)
-                        min_bot_weight = min_weight[1].astype(np.uint16) << 15 - (2 * i + 1)
-                        combine_weight += min_top_weight
-                        combine_weight += min_bot_weight
-                    combine_weight = combine_weight.view(np.uint8)
-                    # combine_weight = combine_weight[:, [1, 0]]
-                    combine_weight = np.reshape(combine_weight, bm)
-                    sign_weight_list.append(combine_weight)
-    final_weight.extend(sign_weight_list)
-    final_weight.extend(sign_weight_list)
+    final_weight.append(combine_weight)
 
 
 def preprocess_weights_tl2(
@@ -732,9 +670,8 @@ def preprocess_weights_tl2(
 
     if (weight.shape[1] % BY3 != 0):
         slice_k_idx = weight.shape[1] - weight.shape[1] % BY3
-        slice_weights = np.split(weight, [slice_k_idx], axis=1)
-        three_weight = slice_weights[0]
-        two_weight = slice_weights[1]
+        three_weight = weight[:, :slice_k_idx]
+        two_weight = weight[:, slice_k_idx:]
     else:
         three_weight = weight
 
@@ -761,7 +698,7 @@ def preprocess_weights_tl2(
                          two_weight,
                          final_weight)
 
-    weight = np.array(final_weight, dtype=np.uint8)
+    weight = np.concatenate(final_weight, axis=0)
 
     return weight
     
