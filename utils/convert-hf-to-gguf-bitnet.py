@@ -538,8 +538,7 @@ def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_w
     weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
     weight = weight.reshape(M * K // bm // by, bm)
     
-    for i in range(weight.shape[0]):
-        final_weight.append(weight[i, :])
+    final_weight.append(weight)
 
 def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
     # Mathematical Optimization: Horner's method on 1D strided views.
@@ -570,8 +569,7 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
     weight = weight.reshape(M * K // bm // by, bm)
 
-    for i in range(weight.shape[0]):
-        final_weight.append(weight[i, :])
+    final_weight.append(weight)
 
     sign_weight = sign_weight.reshape((M // BM, BM, K // 3)).transpose(0, 2, 1)
     sign_weight = sign_weight.reshape((M // BM, K // BY, BY // 3, BM)).transpose(0, 1, 3, 2)
@@ -586,8 +584,7 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     combine_weight = combine_weight.view(np.uint8)
     combine_weight = combine_weight.reshape((M * K // bm // (by * 4)), bm)
     
-    for i in range(combine_weight.shape[0]):
-        final_weight.append(combine_weight[i, :])
+    final_weight.append(combine_weight)
 
 def preprocess_weights_tl2(
     w: np.ndarray,
@@ -620,9 +617,8 @@ def preprocess_weights_tl2(
 
     if (weight.shape[1] % BY != 0):
         slice_k_idx = weight.shape[1] - weight.shape[1] % BY
-        slice_weights = np.split(weight, [slice_k_idx], axis=1)
-        three_weight = slice_weights[0]
-        two_weight = slice_weights[1]
+        three_weight = weight[:, :slice_k_idx]
+        two_weight = weight[:, slice_k_idx:]
     else:
         three_weight = weight
 
@@ -648,7 +644,7 @@ def preprocess_weights_tl2(
                          4,
                          two_weight,
                          final_weight)
-    weight = np.array(final_weight, dtype=np.uint8).reshape(-1)
+    weight = np.concatenate(final_weight, axis=0).reshape(-1)
     weight = np.pad(weight, (0, (K - 256) * M // 3 * 5 // 8 + 256 * M // 2 * 4 // 8 -
                              weight.shape[0]), mode='constant', constant_values=0)
     return weight
