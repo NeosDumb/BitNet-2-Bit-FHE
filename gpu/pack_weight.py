@@ -19,27 +19,27 @@ def permutate_weight_fastest(weight):
     wmma_k = 32
     N = weight.shape[0]
     K = weight.shape[1]
-    
+
     # Create a lookup table for the permutation
     mapping = np.zeros((wmma_n, wmma_k, 2), dtype=int)
     for ii in range(wmma_n):
         for jj in range(wmma_k):
             mapping[ii, jj] = B_global_16x32_to_shared_load_16x32_layout(ii, jj)
-    
+
     # Reshape weight for the final format
     permutated_weight = np.zeros((N // wmma_n, K // wmma_k, wmma_n, wmma_k), dtype="int8")
-    
+
     # Use advanced indexing for the entire operation
     i_indices = np.arange(N // wmma_n)[:, np.newaxis, np.newaxis, np.newaxis]
     j_indices = np.arange(K // wmma_k)[np.newaxis, :, np.newaxis, np.newaxis]
-    
+
     # Create the source indices
     src_i = i_indices * wmma_n + mapping[:, :, 0]
     src_j = j_indices * wmma_k + mapping[:, :, 1]
-    
+
     # Extract and reshape in one go
     permutated_weight = weight[src_i, src_j]
-    
+
     return permutated_weight
 
 
@@ -55,23 +55,45 @@ def compress_int2_to_int8(int2_weight):
     return (((r[..., 3] * 4 + r[..., 2]) * 4 + r[..., 1]) * 4 + r[..., 0]).astype(np.int8)
 
 
-def interleave_weight_int8(qweight, nbits=2):\
-    # reinterpret the data type of qweight to int32
-    # shift = [ 0,  8, 16, 24,  2, 10, 18, 26,  4, 12, 20, 28,  6, 14, 22, 30]
-    # index: [ 0,  4,  8, 12,  1,  5,  9, 13,  2,  6, 10, 14,  3,  7, 11, 15]
-    qweight = qweight.view(np.int32)
-    new_qweight = np.zeros_like(qweight)
-    bits_stride = 8
-    mask = (1 << nbits) - 1  # for 4bit the val is 0x0000000f
-    num_groups = 32 // bits_stride # 4
-    elems_per_group = bits_stride // nbits  # 4
-    for i in range(num_groups):
-        for j in range(elems_per_group):
-            offset = i * elems_per_group + j
-            shift = (offset % num_groups) * bits_stride + (offset // num_groups) * nbits
+def interleave_weight_int8(qweight, nbits=2):
+    if nbits == 2:
+        # Mathematical Optimization: Matrix transposition of sub-elements
+        # When bitwise interleaving packed discrete states (e.g. 2-bit weights),
+        # the operation is mathematically equivalent to a matrix transposition
+        # of the bit-pairs across the 4 bytes.
+        # Viewing the array as np.uint8 reshaped to (-1, 4) allows evaluating
+        # the transpositions natively via vectorization, bypassing slow O(N)
+        # Python nested loops and iterative intermediate bit shifts.
+        orig_shape = qweight.shape
+        x = qweight.view(np.uint8).reshape(-1, 4)
+        y = np.zeros_like(x)
 
-            new_qweight |= ((qweight >> (nbits * offset)) & mask) << shift
-    return new_qweight.view(np.int8)
+        mask = (1 << nbits) - 1
+        for i in range(4):
+            shift = i * nbits
+            y[:, i] = ((x[:, 0] >> shift) & mask) | \
+                      (((x[:, 1] >> shift) & mask) << 2) | \
+                      (((x[:, 2] >> shift) & mask) << 4) | \
+                      (((x[:, 3] >> shift) & mask) << 6)
+
+        return y.reshape(orig_shape).view(np.int8)
+    else:
+        # reinterpret the data type of qweight to int32
+        # shift = [ 0,  8, 16, 24,  2, 10, 18, 26,  4, 12, 20, 28,  6, 14, 22, 30]
+        # index: [ 0,  4,  8, 12,  1,  5,  9, 13,  2,  6, 10, 14,  3,  7, 11, 15]
+        qweight = qweight.view(np.int32)
+        new_qweight = np.zeros_like(qweight)
+        bits_stride = 8
+        mask = (1 << nbits) - 1  # for 4bit the val is 0x0000000f
+        num_groups = 32 // bits_stride # 4
+        elems_per_group = bits_stride // nbits  # 4
+        for i in range(num_groups):
+            for j in range(elems_per_group):
+                offset = i * elems_per_group + j
+                shift = (offset % num_groups) * bits_stride + (offset // num_groups) * nbits
+
+                new_qweight |= ((qweight >> (nbits * offset)) & mask) << shift
+        return new_qweight.view(np.int8)
 
 
 
@@ -80,7 +102,7 @@ def convert_weight_int8_to_int2(weight):
     K = weight.shape[1]
 
     weight = weight+2
-    
+
     weight = weight.cpu().numpy()
 
     # print(weight)
