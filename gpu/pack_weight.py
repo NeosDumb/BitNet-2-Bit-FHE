@@ -56,44 +56,36 @@ def compress_int2_to_int8(int2_weight):
 
 
 def interleave_weight_int8(qweight, nbits=2):
-    if nbits == 2:
-        # Mathematical Optimization: Matrix transposition of sub-elements
-        # When bitwise interleaving packed discrete states (e.g. 2-bit weights),
-        # the operation is mathematically equivalent to a matrix transposition
-        # of the bit-pairs across the 4 bytes.
-        # Viewing the array as np.uint8 reshaped to (-1, 4) allows evaluating
-        # the transpositions natively via vectorization, bypassing slow O(N)
-        # Python nested loops and iterative intermediate bit shifts.
-        orig_shape = qweight.shape
-        x = qweight.view(np.uint8).reshape(-1, 4)
-        y = np.zeros_like(x)
-
-        mask = (1 << nbits) - 1
-        for i in range(4):
-            shift = i * nbits
-            y[:, i] = ((x[:, 0] >> shift) & mask) | \
-                      (((x[:, 1] >> shift) & mask) << 2) | \
-                      (((x[:, 2] >> shift) & mask) << 4) | \
-                      (((x[:, 3] >> shift) & mask) << 6)
-
-        return y.reshape(orig_shape).view(np.int8)
-    else:
-        # reinterpret the data type of qweight to int32
-        # shift = [ 0,  8, 16, 24,  2, 10, 18, 26,  4, 12, 20, 28,  6, 14, 22, 30]
-        # index: [ 0,  4,  8, 12,  1,  5,  9, 13,  2,  6, 10, 14,  3,  7, 11, 15]
+    # Mathematical Optimization: Matrix Transpose of Bit-Packed States
+    # The original algorithm performs 16 iterations over the entire array.
+    # Mathematically, interleaving 2-bit values across 4 bytes is equivalent to
+    # transposing a 4x4 matrix of 2-bit elements. By viewing the states as uint8
+    # arrays reshaped to (-1, 4), we evaluate the column transpositions directly natively
+    # in C via NumPy vectorization, eliminating Python loops and intermediate memory allocations.
+    if nbits != 2:
+        # Fallback to original logic for nbits other than 2
         qweight = qweight.view(np.int32)
         new_qweight = np.zeros_like(qweight)
         bits_stride = 8
-        mask = (1 << nbits) - 1  # for 4bit the val is 0x0000000f
-        num_groups = 32 // bits_stride # 4
-        elems_per_group = bits_stride // nbits  # 4
+        mask = (1 << nbits) - 1
+        num_groups = 32 // bits_stride
+        elems_per_group = bits_stride // nbits
         for i in range(num_groups):
             for j in range(elems_per_group):
                 offset = i * elems_per_group + j
                 shift = (offset % num_groups) * bits_stride + (offset // num_groups) * nbits
-
                 new_qweight |= ((qweight >> (nbits * offset)) & mask) << shift
         return new_qweight.view(np.int8)
+
+    shape = qweight.shape
+    r = qweight.view(np.uint8).reshape(-1, 4)
+    new_r = np.zeros_like(r)
+    for i in range(4):
+        new_r[:, i] = (((r[:, 3] >> (i*2)) & 3) << 6) | \
+                      (((r[:, 2] >> (i*2)) & 3) << 4) | \
+                      (((r[:, 1] >> (i*2)) & 3) << 2) | \
+                       ((r[:, 0] >> (i*2)) & 3)
+    return new_r.view(np.int8).reshape(shape)
 
 
 
