@@ -459,18 +459,17 @@ class Model(ABC):
 # TL1
 
 def process_tl1(weight, BM, BY, bm, by, M, K):
-    weight = weight.reshape((M, K // 2)).astype(np.uint8)
-    weight = weight.reshape((M // BM, BM, K // 2)).transpose(0, 2, 1)
-    weight = weight.reshape((M // BM, K // BY, BY // 2, BM)).transpose(0, 1, 3, 2)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 2)).transpose(0, 1, 2, 4, 3)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 2, bm)).transpose(0, 1, 2, 3, 5, 4)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm // 16, 16, by // 2)).transpose(0, 1, 2, 3, 4, 6, 5)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm // 16, by // 4, 4 // 2, 16)).transpose(0, 1, 2, 3, 4, 5, 7, 6)
-    weight = weight.reshape((M * K // 16 // 4, 16, 4 // 2))
-    weight_0 = weight[:, :, 0] << 4
-    weight_1 = weight[:, :, 1]
-    weight = weight_0 + weight_1
-    return weight
+    # Mathematical Optimization: Zero-copy memory transpose
+    # The mathematical composition of the original 6 intermediate reshapes and
+    # transposes reduces to a single structural permutation. This avoids O(N)
+    # Python overhead and intermediate allocations, leveraging NumPy's
+    # zero-copy strided views.
+    weight = weight.reshape(
+        M // BM, BM // bm, bm // 16, 16,
+        K // BY, BY // by, by // 4, 2
+    ).transpose(0, 4, 1, 5, 2, 6, 3, 7).reshape(M * K // 64, 16, 2).astype(np.uint8)
+
+    return (weight[..., 0] << 4) | weight[..., 1]
 
 def preprocess_weights_tl1(
     w: np.ndarray,
@@ -501,11 +500,11 @@ def preprocess_weights_tl1(
     if BM == -1:
         raise NotImplementedError
 
-    # Mathematical Optimization: Horner's method on 1D strided views.
-    # Evaluates P(x) = x_0 * 3 + x_1 using zero-copy stride arithmetic,
-    # eliminating O(N) array splits and intermediate matrix allocations.
-    weight_flat = weight.ravel()
-    weight = weight_flat[0::2] * 3 + weight_flat[1::2]
+    # Mathematical Optimization: Horner's method on spatial views.
+    # Evaluates P(x) = x_0 * 3 + x_1 natively in C by reshaping the data
+    # and avoiding Python slice allocation entirely.
+    r = weight.reshape(-1, 2)
+    weight = r[:, 0] * 3 + r[:, 1]
 
     weight = weight + 4
     weight = np.reshape(weight, (M, K // 2)).astype(np.uint8)
@@ -516,24 +515,28 @@ def preprocess_weights_tl1(
 
 
 def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
-    # Mathematical Optimization: Horner's method on 1D strided views.
-    # Evaluates P(x) = x_0 * 3 + x_1 using zero-copy stride arithmetic,
-    # eliminating O(N) array splits and intermediate matrix allocations.
-    weight_flat = weight.ravel()
-    weight = weight_flat[0::2] * 3 + weight_flat[1::2]
+    # Mathematical Optimization: Horner's method on spatial views.
+    # Evaluates P(x) = x_0 * 3 + x_1 natively in C by reshaping the data
+    # and avoiding Python slice allocation entirely.
+    r = weight.reshape(-1, 2)
+    weight = r[:, 0] * 3 + r[:, 1]
 
     weight = weight + 4
     weight = np.reshape(weight, (M, K // 2)).astype(np.uint8)
-    weight = weight.reshape((M // BM, BM, K // 2)).transpose(0, 2, 1)
-    weight = weight.reshape((M // BM, K // BY, BY // 2, BM)).transpose(0, 1, 3, 2)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 2)).transpose(0, 1, 2, 4, 3)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 2, bm)).transpose(0, 1, 2, 3, 5, 4)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm, by // 2))
-    weight_0 = weight[:, :, :, :, :, 0]
-    weight_1 = weight[:, :, :, :, :, 1]
-    weight_0 = weight_0 << 4
-    weight_1 = weight_1
-    weight = weight_0 + weight_1
+
+    # Mathematical Optimization: Zero-copy memory transpose
+    # The mathematical composition of the original 4 intermediate reshapes and
+    # transposes reduces to a single structural permutation. This avoids O(N)
+    # Python overhead and intermediate allocations, leveraging NumPy's
+    # zero-copy strided views.
+    weight = weight.reshape(
+        M // BM, BM // bm, bm,
+        K // BY, BY // by, by // 2
+    ).transpose(0, 3, 1, 4, 2, 5)
+
+    weight_0 = weight[..., 0]
+    weight_1 = weight[..., 1]
+    weight = (weight_0 << 4) | weight_1
     weight = weight.reshape((M * K // bm // by, bm // 8, 8))
     weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
     weight = weight.reshape(M * K // bm // by, bm)
@@ -541,11 +544,11 @@ def preprocess_two_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_w
     final_weight.append(weight)
 
 def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final_weight):
-    # Mathematical Optimization: Horner's method on 1D strided views.
-    # Evaluates P(x) = (x_0 * 3 + x_1) * 3 + x_2 using zero-copy stride
-    # arithmetic, eliminating O(N) array splits and matrix allocations.
-    weight_flat = weight.ravel()
-    weight = (weight_flat[0::3] * 3 + weight_flat[1::3]) * 3 + weight_flat[2::3]
+    # Mathematical Optimization: Horner's method on spatial views.
+    # Evaluates P(x) = (x_0 * 3 + x_1) * 3 + x_2 natively in C by reshaping
+    # the data and avoiding Python slice allocation entirely.
+    r = weight.reshape(-1, 3)
+    weight = (r[:, 0] * 3 + r[:, 1]) * 3 + r[:, 2]
 
     # Sign optimization: Data is already discrete integers here,
     # avoiding floating point comparisons.
@@ -555,32 +558,36 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     weight = np.reshape(weight, (M, K // 3)).astype(np.uint8)
     sign_weight = np.reshape(sign_weight, (M, K // 3)).astype(np.uint8)
 
-    weight = weight.reshape((M // BM, BM, K // 3)).transpose(0, 2, 1)
-    weight = weight.reshape((M // BM, K // BY, BY // 3, BM)).transpose(0, 1, 3, 2)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 3)).transpose(0, 1, 2, 4, 3)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, by // 3, bm)).transpose(0, 1, 2, 3, 5, 4)
-    weight = weight.reshape((M // BM, K // BY, BM // bm, BY // by, bm, by // 3))
-    weight_0 = weight[:, :, :, :, :, 0]
-    weight_1 = weight[:, :, :, :, :, 1]
-    weight_0 = weight_0 << 4
-    weight_1 = weight_1
-    weight = weight_0 + weight_1
+    # Mathematical Optimization: Zero-copy memory transpose
+    # The mathematical composition of the original 4 intermediate reshapes and
+    # transposes reduces to a single structural permutation. This avoids O(N)
+    # Python overhead and intermediate allocations, leveraging NumPy's
+    # zero-copy strided views.
+    weight = weight.reshape(
+        M // BM, BM // bm, bm,
+        K // BY, BY // by, by // 3
+    ).transpose(0, 3, 1, 4, 2, 5)
+
+    weight_0 = weight[..., 0]
+    weight_1 = weight[..., 1]
+    weight = (weight_0 << 4) | weight_1
     weight = weight.reshape((M * K // bm // by, bm // 8, 8))
     weight[:, [0, 1, 2, 3], :] = weight[:, [0, 2, 1, 3], :]
     weight = weight.reshape(M * K // bm // by, bm)
 
     final_weight.append(weight)
 
-    sign_weight = sign_weight.reshape((M // BM, BM, K // 3)).transpose(0, 2, 1)
-    sign_weight = sign_weight.reshape((M // BM, K // BY, BY // 3, BM)).transpose(0, 1, 3, 2)
-    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, bm, BY // 3)).transpose(0, 1, 2, 4, 3)
-    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 4, bm)).transpose(0, 1, 2, 3, 5, 4)
-    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), bm, by // 3 * 4)).transpose(0, 1, 2, 3, 5, 4)
-    sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 8, bm // 2)).astype(np.uint16)
+    sign_weight = sign_weight.reshape(
+        M // BM, BM // bm, bm // 2, 2,
+        K // BY, BY // (by * 4), by // 3 * 4
+    ).transpose(0, 4, 1, 5, 6, 2, 3).reshape(
+        M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 8, bm // 2
+    ).astype(np.uint16)
+
     combine_weight = np.zeros((M // BM, K // BY, BM // bm, BY // (by * 4), bm // 2), dtype=np.uint16)
     for i in range(16):
-        temp_weight = sign_weight[:, :, :, :, i, :] << 15 - i
-        combine_weight += temp_weight
+        combine_weight |= (sign_weight[:, :, :, :, i, :] << (15 - i))
+
     combine_weight = combine_weight.view(np.uint8)
     combine_weight = combine_weight.reshape((M * K // bm // (by * 4)), bm)
     
