@@ -1,7 +1,8 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import sys
 import os
+import subprocess
 
 # Import setup_env
 import setup_env
@@ -59,6 +60,64 @@ class TestSetupEnv(unittest.TestCase):
             with patch('sys.stderr', new=MagicMock()):
                 with self.assertRaises(SystemExit):
                     setup_env.parse_args()
+
+class TestSetupEnvUtils(unittest.TestCase):
+    def setUp(self):
+        # setup_env.args is used globally in run_command and get_model_name
+        setup_env.args = MagicMock()
+        setup_env.args.log_dir = "test_logs"
+
+    @patch('subprocess.run')
+    def test_run_command_no_log_step_success(self, mock_run):
+        setup_env.run_command(["ls"])
+        mock_run.assert_called_once_with(["ls"], shell=False, check=True)
+
+    @patch('subprocess.run')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_run_command_with_log_step_success(self, mock_file, mock_run):
+        setup_env.run_command(["ls"], log_step="test_step")
+
+        expected_log_path = os.path.join("test_logs", "test_step.log")
+        mock_file.assert_called_once_with(expected_log_path, "w")
+        mock_run.assert_called_once_with(
+            ["ls"],
+            shell=False,
+            check=True,
+            stdout=mock_file(),
+            stderr=mock_file()
+        )
+
+    @patch('subprocess.run')
+    def test_run_command_no_log_step_failure(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, ["ls"])
+        with patch('logging.error') as mock_log:
+            with self.assertRaises(SystemExit) as cm:
+                setup_env.run_command(["ls"])
+            self.assertEqual(cm.exception.code, 1)
+            mock_log.assert_called()
+
+    @patch('subprocess.run')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_run_command_with_log_step_failure(self, mock_file, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, ["ls"])
+        with patch('logging.error') as mock_log:
+            with self.assertRaises(SystemExit) as cm:
+                setup_env.run_command(["ls"], log_step="test_step")
+            self.assertEqual(cm.exception.code, 1)
+            mock_log.assert_called()
+            expected_log_path = os.path.join("test_logs", "test_step.log")
+            mock_file.assert_called_once_with(expected_log_path, "w")
+
+    def test_get_model_name_hf_repo(self):
+        setup_env.args.hf_repo = "1bitLLM/bitnet_b1_58-large"
+        model_name = setup_env.get_model_name()
+        self.assertEqual(model_name, "bitnet_b1_58-large")
+
+    def test_get_model_name_dir(self):
+        setup_env.args.hf_repo = None
+        setup_env.args.model_dir = "/path/to/my_model/"
+        model_name = setup_env.get_model_name()
+        self.assertEqual(model_name, "my_model")
 
 if __name__ == '__main__':
     unittest.main()
