@@ -7,6 +7,7 @@ Tests GGUF model perplexity on multiple datasets using llama-perplexity.
 import os
 import subprocess
 import time
+import logging
 import csv
 import re
 from datetime import datetime
@@ -15,6 +16,9 @@ import argparse
 import tempfile
 import shutil
 import statistics
+
+
+logger = logging.getLogger(__name__)
 
 
 class PerplexityTester:
@@ -109,8 +113,8 @@ class PerplexityTester:
         for temp_file in self.temp_files:
             try:
                 os.unlink(temp_file)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to delete temporary file {temp_file}: {e}")
         self.temp_files = []
     
     def run_perplexity_test(self, dataset_name, dataset_path, threads=16, ctx_size=512, model_override=None):
@@ -214,8 +218,8 @@ class PerplexityTester:
                 mean = float(match.group(1))
                 std = float(match.group(2))
                 return f"{mean:.4f}±{std:.4f}"
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug(f"Failed to parse perplexity mean/std: {e}")
         
         # Fallback to patterns without std
         patterns = [
@@ -537,6 +541,7 @@ class PerplexityTester:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description='Test model perplexity on multiple datasets')
     parser.add_argument('--model', '-m',
                         required=True,
