@@ -163,7 +163,12 @@ class Attention(nn.Module):
 
 @torch.compile
 def squared_relu(x: torch.Tensor) -> torch.Tensor:
-    return F.relu(x) ** 2
+    # Mathematical Optimization: Multiplication vs Exponentiation
+    # Multiplying the result by itself natively executes as a single
+    # floating-point multiplication instruction instead of invoking
+    # a generic power kernel, yielding a performance boost.
+    r = F.relu(x)
+    return r * r
 
 class FeedForward(nn.Module):
     def __init__(
