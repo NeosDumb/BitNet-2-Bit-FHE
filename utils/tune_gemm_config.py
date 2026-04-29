@@ -293,6 +293,14 @@ def generate_configurations():
     return configurations
 
 
+def get_int_input(prompt):
+    """Safely get an integer input from the user."""
+    while True:
+        try:
+            return int(input(prompt))
+        except ValueError:
+            print("❌ Invalid input. Please enter a valid integer.")
+
 def main():
     parser = argparse.ArgumentParser(description='Tune GEMM configuration for optimal performance')
     parser.add_argument('--config', default='../include/gemm-config.h', 
@@ -323,18 +331,15 @@ def main():
                 break
 
             act = user_input == 'y'
-            try:
-                row = int(input("ROW_BLOCK_SIZE: "))
-                col = int(input("COL_BLOCK_SIZE: "))
-                par = int(input("PARALLEL_SIZE: "))
-                configurations.append({
-                    'act_parallel': act,
-                    'row_block_size': row,
-                    'col_block_size': col,
-                    'parallel_size': par
-                })
-            except ValueError:
-                print("❌ Invalid input. Please enter numeric values for block sizes and parallel size.")
+            row = get_int_input("ROW_BLOCK_SIZE: ")
+            col = get_int_input("COL_BLOCK_SIZE: ")
+            par = get_int_input("PARALLEL_SIZE: ")
+            configurations.append({
+                'act_parallel': act,
+                'row_block_size': row,
+                'col_block_size': col,
+                'parallel_size': par
+            })
     elif args.quick:
         # Quick test mode - test only a few key configurations
         configurations = [
