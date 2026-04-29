@@ -79,11 +79,12 @@ class PerplexityTester:
             if dataset_dir.is_dir():
                 test_file = dataset_dir / "test.txt"
                 if test_file.exists():
-                    size_mb = test_file.stat().st_size / (1024 * 1024)
+                    file_size = test_file.stat().st_size
+                    size_mb = file_size / (1024 * 1024)
                     datasets.append({
                         'name': dataset_dir.name,
                         'path': test_file,
-                        'size': test_file.stat().st_size,
+                        'size': file_size,
                         'size_mb': size_mb
                     })
                     print(f"   ✅ {dataset_dir.name:<20} ({size_mb:.2f} MB)")
