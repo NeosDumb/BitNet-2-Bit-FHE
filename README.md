@@ -1,3 +1,9 @@
+# BitNet-2-Bit-HyperFold
+
+This repository is a custom fork of [microsoft/BitNet](https://github.com/microsoft/BitNet).
+
+---
+
 # bitnet.cpp
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![version](https://img.shields.io/badge/version-1.0-blue)
