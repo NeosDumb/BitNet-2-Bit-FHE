@@ -114,7 +114,7 @@ class PerplexityTester:
             try:
                 os.unlink(temp_file)
             except Exception as e:
-                logger.debug(f"Failed to delete temporary file {temp_file}: {e}")
+                logger.debug(f'Ignored exception: {e}')
         self.temp_files = []
     
     def run_perplexity_test(self, dataset_name, dataset_path, threads=16, ctx_size=512, model_override=None):
