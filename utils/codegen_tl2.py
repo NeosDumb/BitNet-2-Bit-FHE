@@ -278,16 +278,16 @@ static bool is_type_supported(enum ggml_type type) {\n\
 
 def gen_tbl_impl(pre, BM, BK, bm, k_list):
 
-    kernel_code = "\
+    kernel_code = ["\
 #include <immintrin.h>\n\
 \n\
 #define BM{0} {1}\n\
 #define BBK{0} {2}\n\
 template<int batch_size, int K3>\n\
 inline void three_tbl_impl_{0}(int32_t* c, int8_t* lut, uint8_t* a, uint8_t* sign) {{\n\
-".format(pre, BM, BK)
+".format(pre, BM, BK)]
 
-    kernel_code = "".join([kernel_code, "\
+    kernel_code.append("\
 #ifdef __AVX2__\n\
     const __m256i vec_mask = _mm256_set1_epi8(0x0f);\n\
     const __m256i vec_sign_mask  = _mm256_set1_epi16(0x8000);\n\
@@ -526,12 +526,12 @@ int32_t two_qgemm_lut_{0}(void* A, void* LUT, void* Scales, void* LUT_Scales, vo
   return 0;\n\
 }}\n\
 \n\
-".format(pre, k_list[1], k_list[0])])
-    return kernel_code
+".format(pre, k_list[1], k_list[0]))
+    return "".join(kernel_code)
 
 def gen_top_api(kernel_shapes, k_list):
 
-    kernel_code = "void ggml_preprocessor(int bs, int m, int three_k, int two_k, void* B, void* LUT_Scales, void* Three_QLUT, void* Two_QLUT) {{\n\
+    kernel_code = ["void ggml_preprocessor(int bs, int m, int three_k, int two_k, void* B, void* LUT_Scales, void* Three_QLUT, void* Two_QLUT) {{\n\
     partial_max_reset(bs, (&(((float*)LUT_Scales)[0])));\n\
     if (m == {0} && two_k == {1} && three_k == {2}) {{\n\
         for (int32_t b = 0; b < bs; b++) {{\n\
@@ -540,19 +540,19 @@ def gen_top_api(kernel_shapes, k_list):
             two_lut_ctor<{1}>((&(((int8_t*)Two_QLUT)[b * two_k / 2 * 32])), (&(((float*)B)[b * (three_k + two_k) + {2}])), (&(((float*)LUT_Scales)[b])));\n\
         }}\n\
     }}\n\
-".format(kernel_shapes[0][0], k_list[0][0], k_list[0][1])
+".format(kernel_shapes[0][0], k_list[0][0], k_list[0][1])]
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "    else if (m == {0} && two_k == {1} && three_k == {2}) {{\n\
+        kernel_code.append("    else if (m == {0} && two_k == {1} && three_k == {2}) {{\n\
         for (int32_t b = 0; b < bs; b++) {{\n\
             per_tensor_quant(two_k + three_k, (&(((float*)LUT_Scales)[b])), (&(((float*)B)[b * (two_k + three_k)])));\n\
             three_lut_ctor<{2}>((&(((int8_t*)Three_QLUT)[b * three_k / 3 * 32])), (&(((float*)B)[b * (three_k + two_k)])), (&(((float*)LUT_Scales)[b])));\n\
             two_lut_ctor<{1}>((&(((int8_t*)Two_QLUT)[b * two_k / 2 * 32])), (&(((float*)B)[b * (three_k + two_k) + {2}])), (&(((float*)LUT_Scales)[b])));\n\
         }}\n\
-    }}\n".format(kernel_shapes[i][0], k_list[i][0], k_list[i][1])])
-    kernel_code = "".join([kernel_code, "}\n"])
+    }}\n".format(kernel_shapes[i][0], k_list[i][0], k_list[i][1]))
+    kernel_code.append("}\n")
 
 
-    kernel_code = "".join([kernel_code, "void ggml_qgemm_lut(int bs, int m, int k, int BK, void* A, void* sign, void* LUT, void* Scales, void* LUT_Scales, void* C) {{\n\
+    kernel_code.append("void ggml_qgemm_lut(int bs, int m, int k, int BK, void* A, void* sign, void* LUT, void* Scales, void* LUT_Scales, void* C) {{\n\
     if (m == {0} && k == {1}) {{\n\
         if (BK == {2}) {{\n\
             if (bs == 1) {{\n\
@@ -585,9 +585,9 @@ def gen_top_api(kernel_shapes, k_list):
             }}\n\
         }}\n\
     }}\n\
-".format(kernel_shapes[0][0], kernel_shapes[0][1], k_list[0][0], k_list[0][1], "{}_{}".format(kernel_shapes[0][0], kernel_shapes[0][1]))])
+".format(kernel_shapes[0][0], kernel_shapes[0][1], k_list[0][0], k_list[0][1], "{}_{}".format(kernel_shapes[0][0], kernel_shapes[0][1])))
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "    else if (m == {0} && k == {1}) {{\n\
+        kernel_code.append("    else if (m == {0} && k == {1}) {{\n\
         if (BK == {2}) {{\n\
             if (bs == 1) {{\n\
                 two_qgemm_lut_{4}<1>(A, LUT, Scales, LUT_Scales, C);\n\
@@ -619,12 +619,12 @@ def gen_top_api(kernel_shapes, k_list):
             }}\n\
         }}\n\
     }}\n\
-".format(kernel_shapes[i][0], kernel_shapes[i][1], k_list[i][0], k_list[i][1], "{}_{}".format(kernel_shapes[i][0], kernel_shapes[i][1]))])
-    kernel_code = "".join([kernel_code, "}\n"])
-    return kernel_code
+".format(kernel_shapes[i][0], kernel_shapes[i][1], k_list[i][0], k_list[i][1], "{}_{}".format(kernel_shapes[i][0], kernel_shapes[i][1])))
+    kernel_code.append("}\n")
+    return "".join(kernel_code)
 
 def gen_transform_code(kernel_shapes):
-    kernel_code = "\n\
+    kernel_code = ["\n\
 void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
     if (!(is_type_supported(tensor->type) && tensor->backend == GGML_BACKEND_TYPE_CPU && tensor->extra == nullptr)) {\n\
         return;\n\
@@ -634,21 +634,21 @@ void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
     int m = tensor->ne[1];\n\
     const int lut_scales_size = 1;\n\
     int bk = 0;\n\
-    int bm = 0;\n"
+    int bm = 0;\n"]
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
     if (m == {0} && k == {1}) {{\n\
         bm = BM{0}_{1};\n\
         bk = BBK{0}_{1};\n\
-    }}\n".format(kernel_shapes[0][0], kernel_shapes[0][1])])
+    }}\n".format(kernel_shapes[0][0], kernel_shapes[0][1]))
 
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "else if (m == {0} && k == {1}) {{\n\
+        kernel_code.append("else if (m == {0} && k == {1}) {{\n\
         bm = BM{0}_{1};\n\
         bk = BBK{0}_{1};\n\
-    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1])])
+    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1]))
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
     const int n_tile_num = m / bm;\n\
     const int BK = bk;\n\
     uint8_t * qweights;\n\
@@ -669,9 +669,9 @@ void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
         /* .qweights        = */ qweights,\n\
         /* .scales          = */ scales\n\
     };\n\
-}\n"])
+}\n")
 
-    return kernel_code
+    return "".join(kernel_code)
 
 def get_three_k_two_k(K, bk):
     bk_num = K // bk
