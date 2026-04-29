@@ -83,8 +83,8 @@ class TestSetupEnvUtils(unittest.TestCase):
             ["ls"],
             shell=False,
             check=True,
-            stdout=mock_file(),
-            stderr=mock_file()
+            stdout=mock_file.return_value,
+            stderr=mock_file.return_value
         )
 
     @patch('subprocess.run')
@@ -107,6 +107,12 @@ class TestSetupEnvUtils(unittest.TestCase):
             mock_log.assert_called()
             expected_log_path = os.path.join("test_logs", "test_step.log")
             mock_file.assert_called_once_with(expected_log_path, "w")
+
+
+    @patch('subprocess.run')
+    def test_run_command_shell_true(self, mock_run):
+        setup_env.run_command(["ls"], shell=True)
+        mock_run.assert_called_once_with(["ls"], shell=True, check=True)
 
     def test_get_model_name_hf_repo(self):
         setup_env.args.hf_repo = "1bitLLM/bitnet_b1_58-large"
