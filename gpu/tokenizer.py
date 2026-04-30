@@ -14,12 +14,20 @@ from typing import (
     Union,
 )
 
+import functools
 import re
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 
 
 logger = getLogger(__name__)
+
+@functools.lru_cache(maxsize=128)
+def _get_split_pattern(max_consecutive_slice_len: int) -> re.Pattern:
+    """Returns a compiled regex pattern for splitting strings by whitespaces or non-whitespaces."""
+    return re.compile(
+        rf"\s{{{max_consecutive_slice_len+1},}}|\S{{{max_consecutive_slice_len+1},}}"
+    )
 
 Role = Literal["system", "user", "assistant"]
 
@@ -182,9 +190,7 @@ class Tokenizer:
             return
 
         slice_start = 0
-        pattern = re.compile(
-            rf"\s{{{max_consecutive_slice_len+1},}}|\S{{{max_consecutive_slice_len+1},}}"
-        )
+        pattern = _get_split_pattern(max_consecutive_slice_len)
         for match in pattern.finditer(s):
             run_start, run_end = match.span()
             yield s[slice_start : run_start + max_consecutive_slice_len]
