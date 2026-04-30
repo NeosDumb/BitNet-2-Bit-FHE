@@ -189,7 +189,7 @@ static bool is_type_supported(enum ggml_type type) {{\n\
 
 def gen_body_core_code(bm, by):
     length = 4
-    all_code = ""
+    all_code = []
     for i in range(length):
         core_code = "\n\
             uint8x16_t vec_a_{0} = vld1q_u8(a + i * KK / 2 + k * 32 * 2 + {0} * 16);\n\
@@ -207,9 +207,9 @@ def gen_body_core_code(bm, by):
             vec_c[{7}] += vec_v_right_{0}.val[1];\n\
         ".format(i, 2 * by // 2, (4 * i) % (2 * by // 2), (4 * i + 1) % (2 * by // 2), (4 * i + 2) % (2 * by // 2), (4 * i + 3) % (2 * by // 2), (i * 2) // (by // 2) * 2 + 0, (i * 2) // (by // 2) * 2 + 1)
         
-        all_code = "".join([all_code, core_code])
+        all_code.append(core_code)
 
-    all_code = "".join([all_code, "\n       }\n\n"])
+    all_code.append("\n       }\n\n")
 
     for i in range(bm // 8):
         core_code = "\
@@ -217,13 +217,13 @@ def gen_body_core_code(bm, by):
         int32x4_t vec_v_bot_low_high_{0} = vmovl_high_s16(vec_c[{0}]);\n\
         vst1q_s32(c + i + {1}, vld1q_s32(c + i + {1}) + vec_v_bot_low_low_{0});\n\
         vst1q_s32(c + i + {2}, vld1q_s32(c + i + {2}) + vec_v_bot_low_high_{0});\n".format(i, i * 8, i * 8 + 4)
-        all_code = "".join([all_code, core_code])
+        all_code.append(core_code)
 
-    return all_code
+    return "".join(all_code)
 
 def gen_tbl_impl(pre, BM, BK, bm, k):
 
-    kernel_code = "\
+    kernel_code = ["\
 #include <arm_neon.h>\n\
 \n\
 #define BM{0} {1}\n\
@@ -234,15 +234,15 @@ inline void tbl_impl_{0}(int32_t* c, int8_t* lut, uint8_t* a) {{\n\
     const uint8x16_t vec_mask = vdupq_n_u8(0x0f);\n\
     const int8x16_t vec_zero = vdupq_n_s16(0x0000);\n\
     int8x16_t vec_lut[2 * KK];\n\
-".format(pre, BM, BK)
+".format(pre, BM, BK)]
     
-    kernel_code = "".join([kernel_code, "    int16x8_t vec_c[{}];".format(bm // 8)])
+    kernel_code.append("    int16x8_t vec_c[{}];".format(bm // 8))
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
 #pragma unroll\n\
     for (int k = 0; k < 2 * KK; k++) {\n\
         vec_lut[k] = vld1q_s8(lut + k * 16);\n\
-    }\n"])
+    }\n")
 
     pre_core_code = "\n\
 #pragma unroll\n\
@@ -263,9 +263,12 @@ inline void tbl_impl_{0}(int32_t* c, int8_t* lut, uint8_t* a) {{\n\
 #endif\n\
 }\n"
 
-    kernel_code = "".join([kernel_code, pre_core_code, body_core_pre_code, gen_body_core_code(bm, 256 // bm), body_core_post_code])
+    kernel_code.append(pre_core_code)
+    kernel_code.append(body_core_pre_code)
+    kernel_code.append(gen_body_core_code(bm, 256 // bm))
+    kernel_code.append(body_core_post_code)
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
 int32_t qgemm_lut_{0}(void* A, void* LUT, void* Scales, void* LUT_Scales, void* C) {{\n\
     alignas({1}) uint32_t CBits[BM{0}];\n\
     memset(&(CBits[0]), 0, BM{0} * sizeof(int32_t));\n\
@@ -278,34 +281,34 @@ int32_t qgemm_lut_{0}(void* A, void* LUT, void* Scales, void* LUT_Scales, void* 
         ((bitnet_float_type*)C)[i] = (((int32_t*)CBits)[i]) / ((bitnet_float_type*)LUT_Scales)[0] * ((bitnet_float_type*)Scales)[0];\n\
     }}\n\
   return 0;\n\
-}};\n".format(pre, min(32, BK), k)])
+}};\n".format(pre, min(32, BK), k))
 
-    return kernel_code
+    return "".join(kernel_code)
 
 def gen_top_api(kernel_shapes):
 
-    kernel_code = "void ggml_preprocessor(int m, int k, void* B, void* LUT_Scales, void* QLUT) {{\n\
+    kernel_code = ["void ggml_preprocessor(int m, int k, void* B, void* LUT_Scales, void* QLUT) {{\n\
     if (m == {0} && k == {1}) {{\n\
         preprocessor_k<{1}>(B, LUT_Scales, QLUT);\n\
     }}\n\
-".format(kernel_shapes[0][0], kernel_shapes[0][1])
+".format(kernel_shapes[0][0], kernel_shapes[0][1])]
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "    else if (m == {0} && k == {1}) {{\n\
+        kernel_code.append("    else if (m == {0} && k == {1}) {{\n\
         preprocessor_k<{1}>(B, LUT_Scales, QLUT);\n\
-    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1])])
-    kernel_code = "".join([kernel_code, "}\n"])
-    kernel_code = "".join([kernel_code, "void ggml_qgemm_lut(int m, int k, void* A, void* LUT, void* Scales, void* LUT_Scales, void* C) {{\n\
+    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1]))
+    kernel_code.append("}\n")
+    kernel_code.append("void ggml_qgemm_lut(int m, int k, void* A, void* LUT, void* Scales, void* LUT_Scales, void* C) {{\n\
     if (m == {0} && k == {1}) {{\n\
         qgemm_lut_{0}_{1}(A, LUT, Scales, LUT_Scales, C);\n\
     }}\n\
-".format(kernel_shapes[0][0], kernel_shapes[0][1])])
+".format(kernel_shapes[0][0], kernel_shapes[0][1]))
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "    else if (m == {0} && k == {1}) {{\n\
+        kernel_code.append("    else if (m == {0} && k == {1}) {{\n\
         qgemm_lut_{0}_{1}(A, LUT, Scales, LUT_Scales, C);\n\
     }}\n\
-".format(kernel_shapes[i][0], kernel_shapes[i][1])])
-    kernel_code = "".join([kernel_code, "}\n"])
-    return kernel_code
+".format(kernel_shapes[i][0], kernel_shapes[i][1]))
+    kernel_code.append("}\n")
+    return "".join(kernel_code)
 
 def gen_preprocess_code():
     kernel_code = "\n\
@@ -319,7 +322,7 @@ void preprocessor_k(void* B, void* LUT_Scales, void* QLUT) {{\n\
     return kernel_code
 
 def gen_transform_code(kernel_shape):
-    kernel_code = "\n\
+    kernel_code = ["\n\
 void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
     if (!(is_type_supported(tensor->type) && tensor->backend == GGML_BACKEND_TYPE_CPU && tensor->extra == nullptr)) {\n\
         return;\n\
@@ -330,21 +333,21 @@ void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
     const int lut_scales_size = 1;\n\
     const int scales_size = 1;\n\
     int bk = 0;\n\
-    int bm = 0;\n"
+    int bm = 0;\n"]
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
     if (m == {0} && k == {1}) {{\n\
         bm = BM{0}_{1};\n\
         bk = BBK{0}_{1};\n\
-    }}\n".format(kernel_shapes[0][0], kernel_shapes[0][1])])
+    }}\n".format(kernel_shapes[0][0], kernel_shapes[0][1]))
 
     for i in range(1, len(kernel_shapes)):
-        kernel_code = "".join([kernel_code, "else if (m == {0} && k == {1}) {{\n\
+        kernel_code.append("else if (m == {0} && k == {1}) {{\n\
         bm = BM{0}_{1};\n\
         bk = BBK{0}_{1};\n\
-    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1])])
+    }}\n".format(kernel_shapes[i][0], kernel_shapes[i][1]))
 
-    kernel_code = "".join([kernel_code, "\n\
+    kernel_code.append("\n\
     const int n_tile_num = m / bm;\n\
     const int BK = bk;\n\
     uint8_t * qweights;\n\
@@ -363,9 +366,9 @@ void ggml_bitnet_transform_tensor(struct ggml_tensor * tensor) {\n\
         /* .qweights        = */ qweights,\n\
         /* .scales          = */ scales\n\
     };\n\
-}\n"])
+}\n")
 
-    return kernel_code
+    return "".join(kernel_code)
 
 if __name__ == "__main__":
     ModelShapeDict = {
