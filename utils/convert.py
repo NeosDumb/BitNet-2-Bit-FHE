@@ -954,11 +954,32 @@ class OutputFile:
     def add_meta_arch(self, params: Params) -> None:
         name = "LLaMA"
 
-        # TODO: better logic to determine model name
-        if params.n_ctx == 4096:
+        if params.path_model is not None:
+            dir_model = params.path_model if params.path_model.is_dir() else params.path_model.parent
+
+            # Try to extract from config.json
+            config_path = dir_model / "config.json"
+            if config_path.exists():
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                        if "_name_or_path" in config:
+                            name = config["_name_or_path"]
+                except Exception:
+                    pass
+
+            if name == "LLaMA":
+                # Fallback to extracting from directory path
+                pattern = re.compile(r"^(model|models|weights|checkpoint.*|ckpt.*|snapshots?|step_?\d+|epoch_?\d+|out(put)?_?.*|results?)$", re.IGNORECASE)
+                parts = list(dir_model.resolve().parts)
+                while parts:
+                    part = parts.pop()
+                    if not pattern.match(part):
+                        name = part
+                        break
+
+        if name == "LLaMA" and params.n_ctx == 4096:
             name = "LLaMA v2"
-        elif params.path_model is not None:
-            name = str(params.path_model.parent).split('/')[-1]
 
         self.gguf.add_name                (name)
         self.gguf.add_vocab_size          (params.n_vocab)
