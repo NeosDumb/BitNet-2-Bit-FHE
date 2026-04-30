@@ -331,15 +331,18 @@ def main():
                 break
 
             act = user_input == 'y'
-            row = get_int_input("ROW_BLOCK_SIZE: ")
-            col = get_int_input("COL_BLOCK_SIZE: ")
-            par = get_int_input("PARALLEL_SIZE: ")
-            configurations.append({
-                'act_parallel': act,
-                'row_block_size': row,
-                'col_block_size': col,
-                'parallel_size': par
-            })
+            try:
+                row = get_int_input("ROW_BLOCK_SIZE: ")
+                col = get_int_input("COL_BLOCK_SIZE: ")
+                par = get_int_input("PARALLEL_SIZE: ")
+                configurations.append({
+                    'act_parallel': act,
+                    'row_block_size': row,
+                    'col_block_size': col,
+                    'parallel_size': par
+                })
+            except ValueError:
+                pass
     elif args.quick:
         # Quick test mode - test only a few key configurations
         configurations = [

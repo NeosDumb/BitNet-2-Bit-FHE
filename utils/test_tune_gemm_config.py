@@ -10,12 +10,12 @@ from tune_gemm_config import main
 
 class TestTuneGemmConfig(unittest.TestCase):
     @patch('sys.argv', ['tune_gemm_config.py', '--custom'])
-    @patch('builtins.input', side_effect=['y', 'not_a_number', 'done', 'n'])
+    @patch('builtins.input', side_effect=['y', 'not_a_number', '128', '128', '1', 'done', 'n'])
     @patch('sys.stdout', new_callable=io.StringIO)
     def test_custom_mode_invalid_input(self, mock_stdout, mock_input):
         main()
         output = mock_stdout.getvalue()
-        self.assertIn("❌ Invalid input. Please enter numeric values for block sizes and parallel size.", output)
+        self.assertIn("❌ Invalid input. Please enter a valid integer.", output)
 
 if __name__ == '__main__':
     unittest.main()
