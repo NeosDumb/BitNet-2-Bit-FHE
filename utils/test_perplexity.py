@@ -36,6 +36,7 @@ class PerplexityTester:
         self.results = []
         self.created_models = set()  # Track newly created model files
         self.temp_files = []  # Track temporary files for cleanup
+        self._datasets = None  # Cache for find_datasets()
         
         # Embedding types to test
         self.embedding_types = [
@@ -66,6 +67,9 @@ class PerplexityTester:
     
     def find_datasets(self):
         """Find all test.txt files in dataset directories."""
+        if self._datasets is not None:
+            return self._datasets
+
         datasets = []
         
         if not self.data_dir.exists():
@@ -91,6 +95,7 @@ class PerplexityTester:
                 else:
                     print(f"   ⚠️  {dataset_dir.name:<20} (no test.txt found)")
         
+        self._datasets = datasets
         return datasets
     
     def create_quick_dataset(self, dataset_path, num_chars=4096):
