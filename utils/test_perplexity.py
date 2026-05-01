@@ -14,8 +14,6 @@ from datetime import datetime
 from pathlib import Path
 import argparse
 import tempfile
-import shutil
-import statistics
 
 
 logger = logging.getLogger(__name__)
