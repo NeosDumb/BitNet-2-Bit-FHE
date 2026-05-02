@@ -110,9 +110,10 @@ class TestSetupEnvUtils(unittest.TestCase):
 
 
     @patch('subprocess.run')
-    def test_run_command_shell_true(self, mock_run):
+    def test_run_command_shell_ignored(self, mock_run):
+        # Even if shell=True is passed, it should be ignored and shell=False should be used
         setup_env.run_command(["ls"], shell=True)
-        mock_run.assert_called_once_with(["ls"], shell=True, check=True)
+        mock_run.assert_called_once_with(["ls"], shell=False, check=True)
 
     def test_get_model_name_hf_repo(self):
         setup_env.args.hf_repo = "1bitLLM/bitnet_b1_58-large"
