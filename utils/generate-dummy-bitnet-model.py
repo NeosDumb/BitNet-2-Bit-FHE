@@ -739,8 +739,8 @@ class BitnetModel(Model):
         # This acts as a closed thermodynamic system minimizing entropy (allocation overhead).
         weight_fp = weight.float()
         scale = weight_fp.abs().mean().clamp_(min=1e-5)
-        result = weight_fp.div_(scale).round_().clamp_(-1, 1).mul_(scale)
-        return result.to(dtype)
+        weight_fp.div_(scale).round_().clamp_(-1, 1).mul_(scale)
+        return weight_fp.to(dtype)
 
     def transform_to_tl1(self, x: np.ndarray):
         # Mathematical Optimization: Equivalent Absolute Maximum

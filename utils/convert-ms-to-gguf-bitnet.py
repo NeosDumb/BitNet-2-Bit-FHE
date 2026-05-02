@@ -839,7 +839,7 @@ def forward_t(x):
     dtype = x.dtype
     x = x.float()
     s = 1.0 / x.abs().mean().clamp_(min=1e-5)
-    x = (x * s).round().clamp(-1, 1) / s
+    x.mul_(s).round_().clamp_(-1, 1).div_(s)
     return x.to(dtype)
 
 def weight_quant(weight):
