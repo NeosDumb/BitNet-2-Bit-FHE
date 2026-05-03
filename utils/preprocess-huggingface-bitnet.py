@@ -7,13 +7,11 @@ def quant_weight_fp16(weight):
     # Mathematical Optimization: Conservation of Memory
     # Using zero-copy in-place operations avoids allocating large multi-megabyte intermediate matrices
     # during the quantization transformation, minimizing entropy and effectively cutting processing time.
-    # Mathematical Optimization: Conservation of Memory via L1 Norm
-    # Evaluating weight.abs() implicitly allocates an entirely new identical-sized matrix,
-    # causing a massive O(N) allocation "energy tax". Mathematically, the absolute mean is
-    # equivalent to the L1 norm divided by N. By applying the L1 norm across only the innermost
-    # dimension, we preserve float32 numerical precision while completely avoiding the
-    # intermediate absolute tensor allocation, yielding a ~2.6x performance speedup.
-    s = 1.0 / (weight.norm(p=1, dim=-1).mean() / weight.shape[-1]).clamp_(min=1e-5)
+    # Mathematical Optimization: L1 Norm Replacement for Absolute Mean
+    # Evaluating weight.abs() allocates a full-sized multi-megabyte tensor, incurring an O(N) memory
+    # allocation tax. By computing the equivalent L1 norm via weight.norm(p=1, dim=-1).mean() / weight.shape[-1],
+    # we evaluate the result natively in C without the intermediate allocation, cutting time significantly.
+    s = 1.0 / weight.norm(p=1, dim=-1).mean().div_(weight.shape[-1]).clamp_(min=1e-5)
     weight.mul_(s).round_().clamp_(-1, 1).div_(s)
     return weight
 
