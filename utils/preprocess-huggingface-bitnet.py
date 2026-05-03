@@ -7,7 +7,11 @@ def quant_weight_fp16(weight):
     # Mathematical Optimization: Conservation of Memory
     # Using zero-copy in-place operations avoids allocating large multi-megabyte intermediate matrices
     # during the quantization transformation, minimizing entropy and effectively cutting processing time.
-    s = 1.0 / weight.abs().mean().clamp_(min=1e-5)
+    # Mathematical Optimization: L1 Norm Replacement for Absolute Mean
+    # Evaluating weight.abs() allocates a full-sized multi-megabyte tensor, incurring an O(N) memory
+    # allocation tax. By computing the equivalent L1 norm via weight.norm(p=1, dim=-1).mean() / weight.shape[-1],
+    # we evaluate the result natively in C without the intermediate allocation, cutting time significantly.
+    s = 1.0 / weight.norm(p=1, dim=-1).mean().div_(weight.shape[-1]).clamp_(min=1e-5)
     weight.mul_(s).round_().clamp_(-1, 1).div_(s)
     return weight
 
