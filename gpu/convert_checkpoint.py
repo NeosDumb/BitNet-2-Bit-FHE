@@ -26,7 +26,11 @@ def convert_ts_checkpoint(
         # with zero-copy in-place operations, yielding a ~5x speedup for large layer quantizations.
         # Note: We must clone first because the tensor is mapped as mmap=True, and shared with the fp16 pass.
         w = weight.clone()
-        s = 1.0 / w.abs().mean().clamp_(min=1e-5)
+        # Mathematical Optimization: L1 Norm Replacement for Absolute Mean
+        # Evaluating w.abs() allocates a full-sized multi-megabyte tensor, incurring an O(N) memory
+        # allocation tax. By computing the equivalent L1 norm via w.norm(p=1, dim=-1).mean() / w.shape[-1],
+        # we evaluate the result natively in C without the intermediate allocation, cutting time significantly.
+        s = 1.0 / w.norm(p=1, dim=-1).mean().div_(w.shape[-1]).clamp_(min=1e-5)
         w.mul_(s).round_().clamp_(-1, 1)
         new_weight = w.to(torch.int8)
         new_scale = (1.0 / s).to(torch.bfloat16)
@@ -37,7 +41,11 @@ def convert_ts_checkpoint(
         # Using zero-copy in-place operations avoids allocating large multi-megabyte intermediate matrices
         # during the quantization transformation, minimizing entropy and effectively cutting processing time.
         w = weight.clone()
-        s = 1.0 / w.abs().mean().clamp_(min=1e-5)
+        # Mathematical Optimization: L1 Norm Replacement for Absolute Mean
+        # Evaluating w.abs() allocates a full-sized multi-megabyte tensor, incurring an O(N) memory
+        # allocation tax. By computing the equivalent L1 norm via w.norm(p=1, dim=-1).mean() / w.shape[-1],
+        # we evaluate the result natively in C without the intermediate allocation, cutting time significantly.
+        s = 1.0 / w.norm(p=1, dim=-1).mean().div_(w.shape[-1]).clamp_(min=1e-5)
         w.mul_(s).round_().clamp_(-1, 1).div_(s)
         return w
 

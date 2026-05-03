@@ -838,7 +838,11 @@ import torch
 def forward_t(x):
     dtype = x.dtype
     x = x.float()
-    s = 1.0 / x.abs().mean().clamp_(min=1e-5)
+    # Mathematical Optimization: L1 Norm Replacement for Absolute Mean
+    # Evaluating x.abs() allocates a full-sized multi-megabyte tensor, incurring an O(N) memory
+    # allocation tax. By computing the equivalent L1 norm via x.norm(p=1, dim=-1).mean() / x.shape[-1],
+    # we evaluate the result natively in C without the intermediate allocation, cutting time significantly.
+    s = 1.0 / x.norm(p=1, dim=-1).mean().div_(x.shape[-1]).clamp_(min=1e-5)
     x.mul_(s).round_().clamp_(-1, 1).div_(s)
     return x.to(dtype)
 
