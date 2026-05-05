@@ -65,7 +65,9 @@ class Q8_0QuantizedDataType(QuantizedDataType):
         # Much faster implementation of block quantization contributed by @Cebtenzzre
 
         def quantize_blocks_q8_0(blocks: NDArray) -> Iterable[tuple[Any, Any]]:
-            d = abs(blocks).max(axis = 1) / np.float32(127)
+            # Mathematical Optimization: Equivalent Absolute Maximum
+            # max(|X|) == max(max(X), -min(X)). Replacing abs() skips O(N) array allocation.
+            d = np.maximum(blocks.max(axis = 1), -blocks.min(axis = 1)) / np.float32(127)
             with np.errstate(divide = 'ignore'):
                 qs = (blocks / d[:, None]).round()
             qs[d == 0] = 0
