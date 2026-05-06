@@ -302,7 +302,7 @@ void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accu32 = vdupq_n_s16(0);
+            // int16x8_t accu32 = vdupq_n_s16(0);
 #endif
             for (int j=0; j < 32; j++) {
                 uint8x16_t xq8_3 = vld1q_u8(x_row + i * 32 * 16 + j * 16);
@@ -326,22 +326,23 @@ void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size
                 accu = vdotq_s32(accu, q8_2, yq8_2);
                 accu = vdotq_s32(accu, q8_3, yq8_3);
 #else
-                accu32 = vmlal_s8(accu32, vget_low_s8(q8_0), vget_low_s8(yq8_0));
-                accu32 = vmlal_s8(accu32, vget_high_s8(q8_0), vget_high_s8(yq8_0));
-                accu32 = vmlal_s8(accu32, vget_low_s8(q8_1), vget_low_s8(yq8_1));
-                accu32 = vmlal_s8(accu32, vget_high_s8(q8_1), vget_high_s8(yq8_1));
-                accu32 = vmlal_s8(accu32, vget_low_s8(q8_2), vget_low_s8(yq8_2));
-                accu32 = vmlal_s8(accu32, vget_high_s8(q8_2), vget_high_s8(yq8_2));
-                accu32 = vmlal_s8(accu32, vget_low_s8(q8_3), vget_low_s8(yq8_3));
-                accu32 = vmlal_s8(accu32, vget_high_s8(q8_3), vget_high_s8(yq8_3));
+                // Mathematical Optimization: SIMD Pairwise Reduction
+                    // Since q8 in I2_S is strictly in {-1, 0, 1} and yq8 is clamped to [-127, 127],
+                    // their product vmulq_s8 will strictly bound within [-127, 127], avoiding 8-bit overflow.
+                    // Thus, we can completely bypass vmlal_s8 (which requires high/low unpacking and extra registers).
+                    // Instead, we multiply natively in 8-bit and use pairwise accumulation via vpaddlq_s8 and vpadalq_s16.
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_0, yq8_0)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_1, yq8_1)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_2, yq8_2)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_3, yq8_3)));
 #endif
             }
 
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            accu = vaddq_s32(accu, vmovl_s16(vget_low_s16(accu32)));
-            accu = vaddq_s32(accu, vmovl_high_s16(accu32));
+            /* accu = vaddq_s32(accu, vmovl_s16(vget_low_s16(accu32)));
+            accu = vaddq_s32(accu, vmovl_high_s16(accu32)); */
 #endif
         }
 
@@ -349,7 +350,7 @@ void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accula = vdupq_n_s16(0);
+            // int16x8_t accula = vdupq_n_s16(0);
 #endif
             for (int j = 0; j < la_num; j++) {
                 uint8x16_t xq8_3 = vld1q_u8(x_row + group32_num * 32 * 16 + j * 16);
@@ -373,21 +374,22 @@ void ggml_vec_dot_i2_i8_s_1x1(int n, float * s, size_t bs, const void * vx, size
                 accu = vdotq_s32(accu, q8_2, yq8_2);
                 accu = vdotq_s32(accu, q8_3, yq8_3);
 #else
-                accula = vmlal_s8(accula, vget_low_s8(q8_0), vget_low_s8(yq8_0));
-                accula = vmlal_s8(accula, vget_high_s8(q8_0), vget_high_s8(yq8_0));
-                accula = vmlal_s8(accula, vget_low_s8(q8_1), vget_low_s8(yq8_1));
-                accula = vmlal_s8(accula, vget_high_s8(q8_1), vget_high_s8(yq8_1));
-                accula = vmlal_s8(accula, vget_low_s8(q8_2), vget_low_s8(yq8_2));
-                accula = vmlal_s8(accula, vget_high_s8(q8_2), vget_high_s8(yq8_2));
-                accula = vmlal_s8(accula, vget_low_s8(q8_3), vget_low_s8(yq8_3));
-                accula = vmlal_s8(accula, vget_high_s8(q8_3), vget_high_s8(yq8_3));
+                // Mathematical Optimization: SIMD Pairwise Reduction
+                    // Since q8 in I2_S is strictly in {-1, 0, 1} and yq8 is clamped to [-127, 127],
+                    // their product vmulq_s8 will strictly bound within [-127, 127], avoiding 8-bit overflow.
+                    // Thus, we can completely bypass vmlal_s8 (which requires high/low unpacking and extra registers).
+                    // Instead, we multiply natively in 8-bit and use pairwise accumulation via vpaddlq_s8 and vpadalq_s16.
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_0, yq8_0)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_1, yq8_1)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_2, yq8_2)));
+                    accu = vpadalq_s16(accu, vpaddlq_s8(vmulq_s8(q8_3, yq8_3)));
 #endif
             }
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            accu = vaddq_s32(accu, vmovl_s16(vget_low_s16(accula)));
-            accu = vaddq_s32(accu, vmovl_high_s16(accula));
+            /* accu = vaddq_s32(accu, vmovl_s16(vget_low_s16(accula)));
+            accu = vaddq_s32(accu, vmovl_high_s16(accula)); */
 #endif
         }
         int sumi = vaddlvq_s32(accu);
@@ -642,10 +644,10 @@ void ggml_vec_dot_i2_i8_s_1xN(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accu32[PARALLEL_SIZE];
-            for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
+            // int16x8_t accu32[PARALLEL_SIZE];
+            /* for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
                 accu32[rb] = vdupq_n_s16(0);
-            }
+            } */
 #endif
             const uint8_t * px[PARALLEL_SIZE];
             for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
@@ -695,8 +697,8 @@ void ggml_vec_dot_i2_i8_s_1xN(int n, float * s, size_t bs, const void * vx, size
 
 #else
             for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
-                accu[rb] = vaddq_s32(accu[rb], vmovl_s16(vget_low_s16(accu32[rb])));
-                accu[rb] = vaddq_s32(accu[rb], vmovl_high_s16(accu32[rb]));
+                /* accu[rb] = vaddq_s32(accu[rb], vmovl_s16(vget_low_s16(accu32[rb])));
+                accu[rb] = vaddq_s32(accu[rb], vmovl_high_s16(accu32[rb])); */
             }
 #endif
         }
@@ -705,10 +707,10 @@ void ggml_vec_dot_i2_i8_s_1xN(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accula[PARALLEL_SIZE];
-            for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
+            // int16x8_t accula[PARALLEL_SIZE];
+            /* for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
                 accula[rb] = vdupq_n_s16(0);
-            }
+            } */
 #endif
             const uint8_t * px[PARALLEL_SIZE];
             for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
@@ -758,8 +760,8 @@ void ggml_vec_dot_i2_i8_s_1xN(int n, float * s, size_t bs, const void * vx, size
 
 #else
             for (int rb = 0; rb < PARALLEL_SIZE; rb++) {
-                accu[rb] = vaddq_s32(accu[rb], vmovl_s16(vget_low_s16(accula[rb])));
-                accu[rb] = vaddq_s32(accu[rb], vmovl_high_s16(accula[rb]));
+                /* accu[rb] = vaddq_s32(accu[rb], vmovl_s16(vget_low_s16(accula[rb])));
+                accu[rb] = vaddq_s32(accu[rb], vmovl_high_s16(accula[rb])); */
             }
 #endif
         }
@@ -897,11 +899,11 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accu32[PARALLEL_SIZE];
+            // int16x8_t accu32[PARALLEL_SIZE];
 
-            for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
+            /* for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
                 accu32[iy] = vdupq_n_s16(0);
-            }
+            } */
 #endif
             for (int j = 0; j < 32; j++) {
                 // 加载并解包 x 数据（对所有列共享）
@@ -928,14 +930,15 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
                     accu[iy] = vdotq_s32(accu[iy], q8_2, yq8_2);
                     accu[iy] = vdotq_s32(accu[iy], q8_3, yq8_3);
 #else
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_low_s8(q8_0), vget_low_s8(yq8_0));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_high_s8(q8_0), vget_high_s8(yq8_0));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_low_s8(q8_1), vget_low_s8(yq8_1));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_high_s8(q8_1), vget_high_s8(yq8_1));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_low_s8(q8_2), vget_low_s8(yq8_2));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_high_s8(q8_2), vget_high_s8(yq8_2));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_low_s8(q8_3), vget_low_s8(yq8_3));
-                    accu32[iy] = vmlal_s8(accu32[iy], vget_high_s8(q8_3), vget_high_s8(yq8_3));
+                    // Mathematical Optimization: SIMD Pairwise Reduction
+                    // Since q8 in I2_S is strictly in {-1, 0, 1} and yq8 is clamped to [-127, 127],
+                    // their product vmulq_s8 will strictly bound within [-127, 127], avoiding 8-bit overflow.
+                    // Thus, we can completely bypass vmlal_s8 (which requires high/low unpacking and extra registers).
+                    // Instead, we multiply natively in 8-bit and use pairwise accumulation via vpaddlq_s8 and vpadalq_s16.
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_0, yq8_0)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_1, yq8_1)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_2, yq8_2)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_3, yq8_3)));
 #endif
                 }
 
@@ -947,7 +950,7 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
 
 #else
             for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
-                accu[iy] = vaddq_s32(accu[iy], vaddq_s32(vmovl_high_s16(accu32[iy]), vmovl_s16(vget_low_s16(accu32[iy]))));
+                /* accu[iy] = vaddq_s32(accu[iy], vaddq_s32(vmovl_high_s16(accu32[iy]), vmovl_s16(vget_low_s16(accu32[iy])))); */
             }
 #endif
         }
@@ -959,11 +962,11 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
 #if defined(__ARM_FEATURE_DOTPROD)
 
 #else
-            int16x8_t accula[PARALLEL_SIZE];
+            // int16x8_t accula[PARALLEL_SIZE];
 
-            for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
+            /* for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
                 accula[iy] = vdupq_n_s16(0);
-            }
+            } */
 #endif
 
             for (int j = 0; j < la_num; j++) {
@@ -991,14 +994,15 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
                     accu[iy] = vdotq_s32(accu[iy], q8_2, yq8_2);
                     accu[iy] = vdotq_s32(accu[iy], q8_3, yq8_3);
 #else
-                    accula[iy] = vmlal_s8(accula[iy], vget_low_s8(q8_0), vget_low_s8(yq8_0));
-                    accula[iy] = vmlal_s8(accula[iy], vget_high_s8(q8_0), vget_high_s8(yq8_0));
-                    accula[iy] = vmlal_s8(accula[iy], vget_low_s8(q8_1), vget_low_s8(yq8_1));
-                    accula[iy] = vmlal_s8(accula[iy], vget_high_s8(q8_1), vget_high_s8(yq8_1));
-                    accula[iy] = vmlal_s8(accula[iy], vget_low_s8(q8_2), vget_low_s8(yq8_2));
-                    accula[iy] = vmlal_s8(accula[iy], vget_high_s8(q8_2), vget_high_s8(yq8_2));
-                    accula[iy] = vmlal_s8(accula[iy], vget_low_s8(q8_3), vget_low_s8(yq8_3));
-                    accula[iy] = vmlal_s8(accula[iy], vget_high_s8(q8_3), vget_high_s8(yq8_3));
+                    // Mathematical Optimization: SIMD Pairwise Reduction
+                    // Since q8 in I2_S is strictly in {-1, 0, 1} and yq8 is clamped to [-127, 127],
+                    // their product vmulq_s8 will strictly bound within [-127, 127], avoiding 8-bit overflow.
+                    // Thus, we can completely bypass vmlal_s8 (which requires high/low unpacking and extra registers).
+                    // Instead, we multiply natively in 8-bit and use pairwise accumulation via vpaddlq_s8 and vpadalq_s16.
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_0, yq8_0)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_1, yq8_1)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_2, yq8_2)));
+                    accu[iy] = vpadalq_s16(accu[iy], vpaddlq_s8(vmulq_s8(q8_3, yq8_3)));
 #endif
                 }
 
@@ -1010,7 +1014,7 @@ void ggml_vec_dot_i2_i8_s_Nx1(int n, float * s, size_t bs, const void * vx, size
 
 #else
             for (int iy = 0; iy < PARALLEL_SIZE; iy++) {
-                accu[iy] = vaddq_s32(accu[iy], vaddq_s32(vmovl_high_s16(accula[iy]), vmovl_s16(vget_low_s16(accula[iy]))));
+                /* accu[iy] = vaddq_s32(accu[iy], vaddq_s32(vmovl_high_s16(accula[iy]), vmovl_s16(vget_low_s16(accula[iy])))); */
             }
 #endif
         }
