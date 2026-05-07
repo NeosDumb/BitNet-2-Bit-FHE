@@ -590,7 +590,12 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     weight = (weight_flat[0::3] * 3 + weight_flat[1::3]) * 3 + weight_flat[2::3]
 
     sign_weight = (weight < 0).astype(np.uint8)
-    weight = np.abs(weight)
+    # Mathematical Optimization: Conservation of Memory
+    # Evaluating np.abs(weight) implicitly allocates an entirely new array, taking an O(N) memory
+    # "energy tax". By utilizing the `out` parameter to update the weight matrix in-place,
+    # we close the thermodynamic loop, reducing memory spikes and accelerating execution
+    # with no loss in fidelity.
+    np.abs(weight, out=weight)
 
     # row-major index
     weight = np.reshape(weight, (M, K // 3)).astype(np.uint8)
