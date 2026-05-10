@@ -8,7 +8,7 @@ import subprocess
 def run_command(command, shell=False):
     """Run a system command and ensure it succeeds."""
     try:
-        subprocess.run(command, shell=False, check=True)
+        subprocess.run(command, shell=shell, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running command: {e}")
         sys.exit(1)
