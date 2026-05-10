@@ -16,6 +16,12 @@ class TestRunInference(unittest.TestCase):
         mock_run.assert_called_once_with(['ls', '-l'], shell=False, check=True)
 
     @patch('subprocess.run')
+    def test_run_command_shell(self, mock_run):
+        # Test shell argument is honored
+        run_inference.run_command(['ls', '-l'], shell=True)
+        mock_run.assert_called_once_with(['ls', '-l'], shell=True, check=True)
+
+    @patch('subprocess.run')
     @patch('sys.exit')
     @patch('builtins.print')
     def test_run_command_failure(self, mock_print, mock_exit, mock_run):
