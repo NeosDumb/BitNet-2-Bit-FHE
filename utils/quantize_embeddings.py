@@ -15,6 +15,10 @@ from datetime import datetime
 
 
 class EmbeddingQuantizer:
+    # Pre-compiled regex for benchmark output parsing
+    RE_THROUGHPUT_STD = re.compile(r'([\d.]+)\s*±\s*([\d.]+)')
+    RE_THROUGHPUT_MEAN = re.compile(r'([\d.]+)')
+
     def __init__(self, input_model, output_dir, quantize_bin="../build/bin/llama-quantize", 
                  bench_bin="../build/bin/llama-bench", stats_dir="../stats", csv_output=None):
         self.input_model = Path(input_model)
@@ -228,14 +232,14 @@ class EmbeddingQuantizer:
                 
                 # Extract t/s data (format: "405.73 ± 3.69" or "405.73")
                 # Try to match "mean ± std" format
-                match_with_std = re.search(r'([\d.]+)\s*±\s*([\d.]+)', throughput_str)
+                match_with_std = self.RE_THROUGHPUT_STD.search(throughput_str)
                 if match_with_std:
                     mean = float(match_with_std.group(1))
                     std = float(match_with_std.group(2))
                     throughput = f"{mean:.2f}±{std:.2f}"
                 else:
                     # Only mean, no std
-                    match = re.search(r'([\d.]+)', throughput_str)
+                    match = self.RE_THROUGHPUT_MEAN.search(throughput_str)
                     if match:
                         throughput = f"{float(match.group(1)):.2f}"
                     else:
