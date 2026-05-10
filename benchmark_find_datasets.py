@@ -1,9 +1,7 @@
 import time
-import tempfile
 from pathlib import Path
 from utils.test_perplexity import PerplexityTester
 import shutil
-import os
 
 def run_benchmark():
     # Create mock dataset directory
@@ -29,7 +27,6 @@ def run_benchmark():
     dummy_model.touch()
 
     # Patch print to suppress output
-    import sys
     import builtins
     original_print = builtins.print
     builtins.print = lambda *args, **kwargs: None
