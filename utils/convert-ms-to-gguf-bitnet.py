@@ -626,7 +626,15 @@ def preprocess_weights(
     # print(w)
     # (M // bits, K, bits) -> (M // bits, bits, K) -> (M // bits, bits, K) -> (M // bits, bits, K // g, g)
     w = w.transpose(0, 2, 1).reshape(M // bits, bits, K // g, g)
-    w = sum([(w[:, :, :, ig] << ig) for ig in range(g)])
+    # Mathematical Optimization: Horner's Method for Polynomial Evaluation
+    # Evaluating the sum of left-shifted arrays via list comprehensions allocates an
+    # intermediate O(N) array for each power of 2, incurring a large memory overhead.
+    # By evaluating the polynomial backwards using Horner's method (e.g., ((x_2 << 1) | x_1) << 1 | x_0),
+    # we avoid these multi-megabyte allocations entirely and improve packing speed natively.
+    w_out = w[..., -1].copy()
+    for ig in range(g - 2, -1, -1):
+        w_out = (w_out << 1) | w[..., ig]
+    w = w_out
     # print(w)
     # 0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23, 8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31
     # for bits=3
@@ -637,7 +645,15 @@ def preprocess_weights(
     w = w.reshape(M // mgroup, ngroups_per_elem, simd_n_in, K // g).transpose(0, 2, 1, 3)
     #             0        1             2             3                 4                  5
     w = w.reshape(M // bm, bm // mgroup, simd_n_in, ngroups_per_elem, K // g // kfactor, kfactor).transpose(0, 4, 1, 5, 2, 3)
-    w = sum([(w[:, :, :, :, :, ng] << (ng * g)) for ng in range(ngroups_per_elem)])
+    # Mathematical Optimization: Horner's Method for Polynomial Evaluation
+    # Evaluating the sum of left-shifted arrays via list comprehensions allocates an
+    # intermediate O(N) array for each power of 2, incurring a large memory overhead.
+    # By evaluating the polynomial backwards using Horner's method,
+    # we avoid these multi-megabyte allocations entirely and improve packing speed natively.
+    w_out = w[..., -1].copy()
+    for ng in range(ngroups_per_elem - 2, -1, -1):
+        w_out = (w_out << g) | w[..., ng]
+    w = w_out
     w = w.reshape(M // bm, K // g // kfactor, bm // mgroup, kfactor, simd_n_in)
     # input size of current TVM API
     w = w.reshape(M // bm, K // g, bm // ngroups_per_elem)
