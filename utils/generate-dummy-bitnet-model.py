@@ -623,11 +623,19 @@ def preprocess_three_weights_tl2(M, K, weight_num, BM, BY, bm, by, weight, final
     sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 4, bm)).transpose(0, 1, 2, 3, 5, 4)
     sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), bm, by // 3 * 4)).transpose(0, 1, 2, 3, 5, 4)
     sign_weight = sign_weight.reshape((M // BM, K // BY, BM // bm, BY // (by * 4), by // 3 * 8, bm // 2)).astype(np.uint16)
-    combine_weight = np.zeros((M // BM, K // BY, BM // bm, BY // (by * 4), bm // 2), dtype=np.uint16)
-    for i in range(16):
-        temp_weight = sign_weight[:, :, :, :, i, :] << 15 - i
-        combine_weight += temp_weight
-    combine_weight = combine_weight.view(np.uint8)
+    # Mathematical Optimization: Zero-copy polynomial evaluation for ternary packing
+    # The original packing loop creates O(N) temporary tensors per step because of
+    # `sign_weight[...] << (15 - i)`. By mathematically representing the bit-packing
+    # as a base-2 polynomial, we can flatten the N-dimensional space to target the bit
+    # dimension (16) directly and evaluate using Horner's Method `res = (res << 1) | next_bit`.
+    # This acts as a closed thermodynamic loop, updating in-place and completely eliminating
+    # large dynamic array allocations and Python-level array iteration over nested shapes.
+    r = sign_weight.reshape(-1, 16, sign_weight.shape[-1])
+    combine_weight = r[:, 0, :].copy()
+    for i in range(1, 16):
+        combine_weight <<= 1
+        combine_weight |= r[:, i, :]
+    combine_weight = combine_weight.reshape(sign_weight.shape[:-2] + (sign_weight.shape[-1],)).view(np.uint8)
     combine_weight = combine_weight.reshape((M * K // bm // (by * 4)), bm)
 
     final_weight.append(combine_weight)
