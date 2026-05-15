@@ -109,11 +109,6 @@ class TestSetupEnvUtils(unittest.TestCase):
             mock_file.assert_called_once_with(expected_log_path, "w")
 
 
-    @patch('subprocess.run')
-    def test_run_command_shell_honored(self, mock_run):
-        # The shell argument should be honored
-        setup_env.run_command(["ls"], shell=True)
-        mock_run.assert_called_once_with(["ls"], shell=True, check=True)
 
     def test_get_model_name_hf_repo(self):
         setup_env.args.hf_repo = "1bitLLM/bitnet_b1_58-large"

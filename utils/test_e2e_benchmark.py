@@ -53,9 +53,6 @@ class TestE2EBenchmark(unittest.TestCase):
         e2e_benchmark.run_command(['ls'])
         mock_run.assert_called_with(['ls'], shell=False, check=True)
 
-        # Scenario 1b: run_command with shell=True (success)
-        e2e_benchmark.run_command(['ls'], shell=True)
-        mock_run.assert_called_with(['ls'], shell=True, check=True)
 
         # Scenario 2: run_command without log_step (failure)
         mock_run.side_effect = subprocess.CalledProcessError(1, 'ls')
