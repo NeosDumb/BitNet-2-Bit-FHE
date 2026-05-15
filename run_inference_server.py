@@ -5,10 +5,10 @@ import platform
 import argparse
 import subprocess
 
-def run_command(command, shell=False):
+def run_command(command):
     """Run a system command and ensure it succeeds."""
     try:
-        subprocess.run(command, shell=shell, check=True)
+        subprocess.run(command, shell=False, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running command: {e}")
         sys.exit(1)
