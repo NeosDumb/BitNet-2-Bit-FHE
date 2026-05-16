@@ -2,7 +2,7 @@ import numpy as np
 import time
 
 def original_1(w, g):
-    return sum([(w[:, :, :, ig] << ig) for ig in range(g)])
+    return sum((w[:, :, :, ig] << ig) for ig in range(g))
 
 def optimized_1(w, g):
     w_out = w[..., -1].copy()
@@ -11,7 +11,7 @@ def optimized_1(w, g):
     return w_out
 
 def original_2(w, ngroups_per_elem, g):
-    return sum([(w[:, :, :, :, :, ng] << (ng * g)) for ng in range(ngroups_per_elem)])
+    return sum((w[:, :, :, :, :, ng] << (ng * g)) for ng in range(ngroups_per_elem))
 
 def optimized_2(w, ngroups_per_elem, g):
     w_out = w[..., -1].copy()
