@@ -6,6 +6,7 @@
 import os
 import sys
 import time
+import itertools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, Union
@@ -234,7 +235,12 @@ class FastGen:
         # Input tensors to the cuda graph
         kv_seqlen = bias.k_seqinfo.seqlen
         prompts = [prompt + [1] * (self.gen_args.prompt_length - len(prompt)) for prompt in prompts]
-        tokens = torch.IntTensor(sum(prompts, [])).cuda()
+        # Mathematical Optimization: O(N) Array Flattening
+        # Using `sum(prompts, [])` performs repeated O(N) list creations during concatenation,
+        # yielding an overall O(N^2) "energy tax" for list flattening.
+        # By utilizing `itertools.chain.from_iterable`, we map the mathematical structure of the
+        # operation into a single pass, flattening the sequence in O(N) time with minimal allocations.
+        tokens = torch.IntTensor(list(itertools.chain.from_iterable(prompts))).cuda()
         out_tokens = torch.zeros((max_seq_length, bs), dtype=torch.int)
 
         stats = Stats()
