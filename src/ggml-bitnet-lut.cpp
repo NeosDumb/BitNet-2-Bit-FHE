@@ -84,6 +84,9 @@ size_t ggml_bitnet_mul_mat_get_wsize(const struct ggml_tensor * src0, const stru
 int ggml_bitnet_get_type_bits(enum ggml_type type) {
     switch (type) {
         case GGML_TYPE_TL1:
+        case GGML_TYPE_I2_S:
+        case GGML_TYPE_TQ1_0:
+        case GGML_TYPE_TQ2_0:
             return 2;
         case GGML_TYPE_Q4_0:
             return 4;
@@ -156,6 +159,9 @@ size_t ggml_bitnet_mul_mat_get_wsize(const struct ggml_tensor * src0, const stru
 int ggml_bitnet_get_type_bits(enum ggml_type type) {
     switch (type) {
         case GGML_TYPE_TL2:
+        case GGML_TYPE_I2_S:
+        case GGML_TYPE_TQ1_0:
+        case GGML_TYPE_TQ2_0:
             return 2;
         case GGML_TYPE_Q4_0:
             return 4;
