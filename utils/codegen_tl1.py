@@ -177,8 +177,7 @@ inline void lut_ctor(int8_t* qlut, bitnet_float_type* b, bitnet_float_type* lut_
 }}\n\
 \n\
 static bool is_type_supported(enum ggml_type type) {{\n\
-    if (type == GGML_TYPE_Q4_0 ||\n\
-        type == GGML_TYPE_TL1) {{\n\
+    if (type == GGML_TYPE_TL1) {{\n\
         return true;\n\
     }} else {{\n\
         return false;\n\

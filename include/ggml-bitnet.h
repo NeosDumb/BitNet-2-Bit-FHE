@@ -24,10 +24,8 @@ struct bitnet_tensor_extra {
 
 GGML_API void ggml_bitnet_init(void);
 GGML_API void ggml_bitnet_free(void);
-// src0->type == Q4_0/IQ2_XXS/IQ3_XXS
-// bitnet.cpp currently only supports BitNet quantization or GPTQ-like quantization (only scales, without zeros)
-// If use i-quantization gguf models, the results will be wrong
-// TODO: add customized block types Q2_0/Q3_0
+// bitnet.cpp supports BitNet quantization (TL1, TL2) and i-quantization (I2_S)
+// GPTQ-like quantization (only scales, without zeros) is also supported
 GGML_API bool ggml_bitnet_can_mul_mat(const struct ggml_tensor * src0, const struct ggml_tensor * src1, const struct ggml_tensor * dst);
 GGML_API size_t ggml_bitnet_mul_mat_get_wsize(const struct ggml_tensor * src0, const struct ggml_tensor * src1, const struct ggml_tensor * dst);
 GGML_API void ggml_bitnet_mul_mat_task_init(void * src1, void * qlut, void * lut_scales, void * lut_biases, int n, int k, int m, int bits);
